@@ -385,7 +385,7 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                 )
 
                 st.divider()
-                st.subheader("Vista Previa - Consolidado Bancario para Don José")
+                st.subheader("Vista Previa - Consolidado Bancario")
                 st.dataframe(df_resultado, use_container_width=True)
 
         except Exception as e:
