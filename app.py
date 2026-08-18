@@ -315,14 +315,12 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 contador = 1
                 for index, row in df_completo.iterrows():
-                    # SOLUCIÓN AL ERROR: Extraemos el valor, lo limpiamos y lo convertimos a float de manera segura
                     valor_crudo = str(row.get('TOTAL A PAGAR', '0')).replace('$', '').replace(',', '').strip()
                     try:
                         ingreso_bruto = float(valor_crudo)
                     except ValueError:
                         ingreso_bruto = 0.0
 
-                    # Ahora sí comparamos numéricamente
                     if ingreso_bruto > 0:
                         retefuente = ingreso_bruto * 0.01
                         ica = ingreso_bruto * 0.01 if row['CIUDAD'] == 'CALI' else 0.0
@@ -360,9 +358,12 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                         zip_file.writestr(f"Cuentas_Cobro/{contador}_{nombre_titular.replace(' ', '_')}_Cuenta.pdf", generar_pdf_cuenta_cobro(datos_doc))
                         zip_file.writestr(f"Docs_Equivalentes/{contador}_{nombre_titular.replace(' ', '_')}_DocEq.xlsx", generar_excel_documento_equivalente(datos_doc))
                         contador += 1
+                
+                # --- SOLUCIÓN APLICADA AQUÍ: Esto ahora está DENTRO de la indentación del 'with' ---
+                df_resultado = pd.DataFrame(pagos_procesados)
+                zip_file.writestr("Archivo_Plano_Bancario.csv", df_resultado.to_csv(index=False, sep=';').encode('utf-8'))
             
-            df_resultado = pd.DataFrame(pagos_procesados)
-            zip_file.writestr("Archivo_Plano_Bancario.csv", df_resultado.to_csv(index=False, sep=';').encode('utf-8'))
+            # --- Esto puede quedar fuera porque opera en el buffer en memoria, no sobre la función zip ---
             zip_buffer.seek(0)
             
             status.update(label="¡Proceso finalizado con éxito!", state="complete", expanded=False)
