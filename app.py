@@ -408,7 +408,7 @@ with col1:
     except:
         pass
 with col2:
-    st.title("Generador de Pagos y Documentos")
+    st.title("Generador de Documentos")
     st.markdown("**SERGEM Mensajería S.A.S.**")
 
 st.markdown("""
