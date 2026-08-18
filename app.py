@@ -11,7 +11,7 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.drawing.image import Image as XLImage
 
 # 1. Configuración de la página
-st.set_page_config(page_title="SERGEM - Nómina y Cuentas", page_icon="sergemLogo.ico", layout="wide")
+st.set_page_config(page_title="SERGEM - Generados de documentos", page_icon="sergemLogo.ico", layout="wide")
 
 # 2. Inyección de CSS corporativo
 st.markdown("""
@@ -488,7 +488,7 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
             )
 
             st.divider()
-            st.subheader("Vista Previa - Consolidado Bancario para Don José")
+            st.subheader("Vista Previa - Consolidado Bancario")
             st.dataframe(df_resultado, use_container_width=True)
 
     except Exception as e:
