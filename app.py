@@ -315,8 +315,15 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 contador = 1
                 for index, row in df_completo.iterrows():
-                    if pd.notna(row.get('TOTAL A PAGAR')) and row.get('TOTAL A PAGAR', 0) > 0:
-                        ingreso_bruto = float(row['TOTAL A PAGAR'])
+                    # SOLUCIÓN AL ERROR: Extraemos el valor, lo limpiamos y lo convertimos a float de manera segura
+                    valor_crudo = str(row.get('TOTAL A PAGAR', '0')).replace('$', '').replace(',', '').strip()
+                    try:
+                        ingreso_bruto = float(valor_crudo)
+                    except ValueError:
+                        ingreso_bruto = 0.0
+
+                    # Ahora sí comparamos numéricamente
+                    if ingreso_bruto > 0:
                         retefuente = ingreso_bruto * 0.01
                         ica = ingreso_bruto * 0.01 if row['CIUDAD'] == 'CALI' else 0.0
                         neto_a_pagar = ingreso_bruto - retefuente - ica
