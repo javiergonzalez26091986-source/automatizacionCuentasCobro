@@ -56,6 +56,16 @@ def obtener_fecha_actual():
     hoy = datetime.now()
     return f"{hoy.day} DE {meses[hoy.month - 1]} DE {hoy.year}"
 
+# --- FUNCIÓN PARA CARGAR DATOS CON CACHÉ ---
+# Esto evita consultar Google Sheets repetitivamente mientras el usuario interactúa
+@st.cache_data(ttl=300) # Se actualiza cada 5 minutos
+def cargar_datos(url):
+    try:
+        response = requests.get(url)
+        return response.json()
+    except Exception as e:
+        return None
+
 # --- CLASE PARA PDF ---
 class PDFCuentaCobro(FPDF):
     def header(self):
@@ -138,7 +148,6 @@ def generar_excel_documento_equivalente(datos):
     ws = wb.active
     ws.title = "Documento Equivalente"
 
-    # Estilos profesionales
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="E3000F", end_color="E3000F", fill_type="solid")
     dark_fill = PatternFill(start_color="333333", end_color="333333", fill_type="solid")
@@ -160,15 +169,12 @@ def generar_excel_documento_equivalente(datos):
     except:
         pass
 
-    # Título Principal adaptado al formato original
     ws.merge_cells('D2:H4')
     ws['D2'] = "DOCUMENTO EQUIVALENTE A LA FACTURA DE VENTA\n(DECRETO 522 DE 2003)\nDOCUMENTO SOPORTE EN ADQUISICIONES A NO OBLIGADOS A FACTURAR"
     ws['D2'].font = Font(bold=True, size=11, color="1E293B")
     ws['D2'].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # FECHAS Y CONSECUTIVO
     hoy = datetime.now()
-    
     ws['B6'] = "Fecha de Expedición:"
     ws['B6'].font = bold_font
     ws['C6'] = "Año:"
@@ -194,7 +200,6 @@ def generar_excel_documento_equivalente(datos):
     ws['H5'].font = Font(bold=True, size=12, color="E3000F")
     ws['H5'].alignment = center_align
 
-    # INFORMACIÓN COMPRADOR (EMPRESA)
     ws['B9'] = " INFORMACIÓN DE LA EMPRESA (COMPRADOR)"
     ws['B9'].font = header_font
     ws['B9'].fill = dark_fill
@@ -219,7 +224,6 @@ def generar_excel_documento_equivalente(datos):
     ws['G11'].font = bold_font
     ws['H11'] = "CALI"
 
-    # INFORMACIÓN VENDEDOR (PROVEEDOR)
     ws['B13'] = " DATOS DEL BENEFICIARIO / PROVEEDOR (VENDEDOR)"
     ws['B13'].font = header_font
     ws['B13'].fill = dark_fill
@@ -235,11 +239,11 @@ def generar_excel_documento_equivalente(datos):
 
     ws['B15'] = "Dirección:"
     ws['B15'].font = bold_font
-    ws['C15'] = "" # En blanco para diligenciar
+    ws['C15'] = "" 
     ws.merge_cells('C15:D15')
     ws['E15'] = "Teléfono:"
     ws['E15'].font = bold_font
-    ws['F15'] = "" # En blanco
+    ws['F15'] = "" 
     ws['G15'] = "Ciudad:"
     ws['G15'].font = bold_font
     ws['H15'] = datos['ciudad']
@@ -251,7 +255,6 @@ def generar_excel_documento_equivalente(datos):
     ws['G16'].font = bold_font
     ws['H16'] = datos['nombre_conductor']
 
-    # Aplicar bordes a las cajas informativas
     for r in range(10, 12):
         for c in ['B', 'C', 'D', 'E', 'F', 'G', 'H']:
             ws[f'{c}{r}'].border = border_thin
@@ -259,7 +262,6 @@ def generar_excel_documento_equivalente(datos):
         for c in ['B', 'C', 'D', 'E', 'F', 'G', 'H']:
             ws[f'{c}{r}'].border = border_thin
 
-    # TABLA DE CONCEPTOS
     fila = 18
     for i, h in enumerate(["Ítem", "Concepto", "Cantidad", "V. Unitario", "V. Total"]):
         c = ['B', 'C', 'F', 'G', 'H'][i] + str(fila)
@@ -303,12 +305,11 @@ def generar_excel_documento_equivalente(datos):
         ws[f'G{fila}'].number_format = '"$"#,##0'
         ws[f'H{fila}'].number_format = '"$"#,##0'
         
-    # TOTALES Y CONTABILIZACIÓN
     fila += 2
     totales = [
         ("SUBTOTAL:", datos['ingreso_bruto_total']),
-        ("IVA (19%):", ""), # Vacío como el original
-        ("RETEIVA:", ""), # Vacío como el original
+        ("IVA (19%):", ""), 
+        ("RETEIVA:", ""), 
         ("RTE FTE (1%):", -datos['retefuente']),
         ("RETEICA (1%):", -datos['ica']),
         ("NETO A PAGAR:", datos['neto_pagar'])
@@ -334,14 +335,12 @@ def generar_excel_documento_equivalente(datos):
             
         fila += 1
 
-    # FIRMA Y DATOS FINALES
     ws[f'B{fila_firma}'] = "________________________________________________"
     ws[f'B{fila_firma+1}'] = "FIRMA PRESTADOR DEL SERVICIO"
     ws[f'B{fila_firma+1}'].font = bold_font
     ws[f'B{fila_firma+2}'] = f"C.C. / NIT: {datos['cedula_titular']}"
     ws[f'B{fila_firma+3}'] = f"NOMBRE: {datos['nombre_titular']}"
 
-    # Ajuste de anchos de columna para mejor visualización
     ws.column_dimensions['B'].width = 16
     ws.column_dimensions['C'].width = 12
     ws.column_dimensions['D'].width = 12
@@ -378,29 +377,52 @@ with col2:
 st.markdown("""
 <div class="instrucciones">
     <strong>💡 Instrucciones:</strong><br>
-    Asegúrese de haber ingresado las horas trabajadas en la hoja <i>PAGOS PERSONAL POR SERVICIOS</i>. 
+    Seleccione el <b>Corte</b> que desea procesar del menú desplegable. 
     Los conductores que tengan un "TOTAL A PAGAR" de $0 serán omitidos automáticamente.
 </div>
 """, unsafe_allow_html=True)
 
+# 1. CARGAMOS LOS DATOS PRIMERO
+data_cruda = cargar_datos(GAS_URL)
+
+if not data_cruda:
+    st.error("Error conectando a la base de datos de Google Sheets. Revise la URL.")
+    st.stop()
+
+df_pagos_completo = pd.DataFrame(data_cruda.get('pagos', []))
+df_fuera = pd.DataFrame(data_cruda.get('fueras_perimetro', []))
+
+if df_pagos_completo.empty:
+    st.warning("No se encontraron datos en Google Sheets.")
+    st.stop()
+
+# Limpiamos columnas
+df_pagos_completo.columns = df_pagos_completo.columns.str.strip().str.upper()
+if not df_fuera.empty:
+    df_fuera.columns = df_fuera.columns.str.strip().str.upper()
+
+# 2. CREAMOS EL MENÚ DESPLEGABLE CON LOS CORTES
+if 'CORTE' in df_pagos_completo.columns:
+    # Filtramos valores nulos o vacíos para el menú
+    cortes_disponibles = [c for c in df_pagos_completo['CORTE'].unique() if str(c).strip() != "" and str(c).lower() != "nan"]
+    if cortes_disponibles:
+        corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar:", cortes_disponibles)
+    else:
+        st.error("La columna CORTE en Google Sheets no tiene datos válidos.")
+        st.stop()
+else:
+    st.error("No se encontró la columna 'CORTE' en la hoja de Google Sheets.")
+    st.stop()
+
+# 3. BOTÓN DE PROCESAMIENTO
 if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
-    mensaje_carga = st.info("📥 Conectando con Google Sheets y procesando la información. Por favor espere...")
+    
+    mensaje_carga = st.info(f"📥 Procesando la información para el corte: {corte_seleccionado}...")
     
     try:
-        response = requests.get(GAS_URL)
-        data = response.json()
+        # Filtramos la tabla solo con el corte seleccionado
+        df_pagos = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado]
         
-        df_pagos = pd.DataFrame(data.get('pagos', []))
-        df_fuera = pd.DataFrame(data.get('fueras_perimetro', []))
-        
-        if df_pagos.empty:
-            st.warning("No se encontraron datos en Google Sheets.")
-            st.stop()
-        
-        df_pagos.columns = df_pagos.columns.str.strip().str.upper()
-        if not df_fuera.empty:
-            df_fuera.columns = df_fuera.columns.str.strip().str.upper()
-
         pagos_procesados = []
         ignorados = 0
         zip_buffer = io.BytesIO()
@@ -453,7 +475,7 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                     'nombre_conductor': nombre_conductor,
                     'cedula_conductor': str(row.get('CEDULA', '')).strip(),
                     'ciudad': ciudad,
-                    'corte_fechas': str(row.get('CORTE', '')).strip(),
+                    'corte_fechas': corte_seleccionado, # Usamos directamente el corte seleccionado
                     'ingreso_base': ingreso_base,
                     'fuera_perimetro': fuera_perimetro,
                     'ingreso_bruto_total': ingreso_bruto_total,
@@ -470,25 +492,25 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                 contador += 1
             
             df_resultado = pd.DataFrame(pagos_procesados)
-            zip_file.writestr("Archivo_Plano_Bancario.csv", df_resultado.to_csv(index=False, sep=';', encoding='utf-8-sig'))
+            zip_file.writestr(f"Archivo_Plano_Bancario_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.csv", df_resultado.to_csv(index=False, sep=';', encoding='utf-8-sig'))
         
         zip_buffer.seek(0)
         
         mensaje_carga.empty() 
-        st.success(f"✅ ¡Proceso finalizado con éxito! Se procesaron {len(df_resultado)} pagos. (Se omitieron {ignorados} registros con saldo $0).")
+        st.success(f"✅ ¡Proceso finalizado con éxito! Se generaron los documentos del corte **{corte_seleccionado}**. Se procesaron {len(df_resultado)} pagos y se omitieron {ignorados} registros con saldo $0.")
         
         if len(df_resultado) > 0:
             st.download_button(
-                label="📥 DESCARGAR ARCHIVOS DE LA QUINCENA (.ZIP)",
+                label=f"📥 DESCARGAR ARCHIVOS (.ZIP) - {corte_seleccionado}",
                 data=zip_buffer,
-                file_name="SERGEM_Documentos_Quincena.zip",
+                file_name=f"SERGEM_Docs_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip",
                 mime="application/zip",
                 type="primary",
                 use_container_width=True
             )
 
             st.divider()
-            st.subheader("Vista Previa - Consolidado Bancario")
+            st.subheader("Vista Previa - Consolidado Bancario para Don José")
             st.dataframe(df_resultado, use_container_width=True)
 
     except Exception as e:
