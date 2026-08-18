@@ -65,13 +65,6 @@ st.markdown("""
     }
     div.stButton > button[kind="secondary"]:hover { background-color: #64748b !important; }
     
-    .instrucciones {
-        background-color: #f8fafc;
-        border-left: 4px solid #E3000F;
-        padding: 1rem;
-        border-radius: 4px;
-        margin-bottom: 2rem;
-    }
     .metric-box {
         background-color: #f1f5f9; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #e2e8f0;
     }
@@ -100,6 +93,15 @@ def limpiar_dinero(val):
     try: return float(s)
     except: return 0.0
 
+def obtener_horas(row):
+    for col in ['HORAS', 'CANTIDAD DE HORAS', 'CANTIDAD HORAS', 'TOTAL HORAS', 'CANTIDAD']:
+        if col in row.index:
+            try:
+                val = float(row[col])
+                if not pd.isna(val): return val
+            except: pass
+    return 1.0
+
 # ==============================================================================
 # GENERACIÓN DE ARCHIVO PLANO BANCARIO (ESTRUCTURA EXACTA TXT)
 # ==============================================================================
@@ -113,7 +115,6 @@ def generar_txt_banco(df_banco):
     num_registros = len(df_banco)
     suma_total = int(df_banco['VALOR_NETO_A_PAGAR'].sum() * 100)
     
-    # 1. Encabezado (Tipo 1)
     header = (
         f"1000000900561833I               225NOMINA    "
         f"{fecha_ymd}AA{fecha_ymd}"
@@ -124,22 +125,15 @@ def generar_txt_banco(df_banco):
     )
     lineas.append(header)
     
-    # 2. Detalles (Tipo 6)
     for _, row in df_banco.iterrows():
         cedula = str(row['NIT_BENEFICIARIO']).replace('.', '').replace(' ', '').replace(',', '')
         cedula = cedula.zfill(15)[:15]
-        
         nombre = str(row['NOMBRE_BENEFICIARIO']).upper().ljust(30)[:30]
-        
-        banco = "005600078" # Código de enrutamiento bancario base
-        
+        banco = "005600078" 
         cuenta = str(row['NUMERO_CUENTA']).replace("'", "").strip().ljust(18)[:18]
-        
         tipo_cta = "37" if "AHORRO" in str(row['TIPO_CUENTA']).upper() else "27"
-        
         valor = int(row['VALOR_NETO_A_PAGAR'] * 100)
         valor_str = f"{valor:017d}"
-        
         filler = "00000                                                                                               000000000000000                           "
         
         linea = (
@@ -156,9 +150,9 @@ def generar_txt_banco(df_banco):
 def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.add_page()
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font("helvetica", "", 11)
     
-    pdf.cell(0, 6, f"{datos['ciudad']} {datos['fecha_emision']}".upper(), 0, 1)
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, f"{datos['ciudad']} {datos['fecha_emision']}".upper(), 0, 1, 'R')
     pdf.ln(12)
     
     pdf.set_font("helvetica", "B", 12)
@@ -171,8 +165,8 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 6, str(datos['nombre_titular']).upper(), 0, 1, 'C')
     pdf.set_font("helvetica", "", 11)
-    pdf.cell(0, 6, f"C.C {datos['cedula_titular']}", 0, 1, 'C')
-    pdf.ln(12)
+    pdf.cell(0, 6, f"C.C / NIT {datos['cedula_titular']}", 0, 1, 'C')
+    pdf.ln(8)
 
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(80, 6, "VALOR BASE:", 0, 0)
@@ -205,40 +199,50 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(80, 8, "VALOR TOTAL NETO A PAGAR:", 0, 0)
     pdf.cell(0, 8, f"$ {datos['neto_pagar']:,.0f}", 0, 1)
-    pdf.ln(8)
+    pdf.ln(6)
     
+    # Tabla de Concepto
     pdf.set_font("helvetica", "B", 11)
-    pdf.cell(25, 6, "CONCEPTO:", 0, 0)
-    pdf.set_font("helvetica", "", 11)
-    concepto = f"SERVICIO PRESTADO EN EL CORTE DE {datos['corte_fechas']}, POR EL CONDUCTOR {datos['nombre_conductor']} CÉDULA {datos['cedula_conductor']}."
-    pdf.multi_cell(0, 6, concepto)
-    pdf.ln(10)
+    pdf.cell(25, 6, "CONCEPTO:", 0, 1)
+    pdf.set_font("helvetica", "", 10)
+    pdf.multi_cell(0, 5, f"SERVICIO DE MENSAJERÍA PRESTADO EN EL CORTE DE {datos['corte_fechas']}, DETALLADO A CONTINUACIÓN:")
+    pdf.ln(2)
+    
+    pdf.set_fill_color(227, 0, 15)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("helvetica", "B", 10)
+    pdf.cell(100, 6, "CONDUCTOR", 1, 0, 'C', fill=True)
+    pdf.cell(45, 6, "CÉDULA", 1, 0, 'C', fill=True)
+    pdf.cell(45, 6, "HORAS", 1, 1, 'C', fill=True)
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("helvetica", "", 10)
+    for c in datos['conductores']:
+        pdf.cell(100, 6, c['nombre_conductor'][:45], 1, 0, 'L')
+        pdf.cell(45, 6, c['cedula_conductor'], 1, 0, 'C')
+        pdf.cell(45, 6, f"{c['horas']:g}", 1, 1, 'C')
+
+    pdf.ln(8)
     
     pdf.set_font("helvetica", "", 11)
     pdf.cell(0, 6, "Autorizo me sea consignado en:", 0, 1)
     pdf.set_font("helvetica", "B", 11)
-    pdf.cell(0, 6, f"CUENTA # {datos['num_cuenta']}", 0, 1)
-    pdf.cell(0, 6, f"{datos['tipo_cuenta'].upper()}", 0, 1)
-    pdf.cell(0, 6, f"NOMBRE DEL BANCO: {datos['banco'].upper()}", 0, 1)
-    pdf.cell(0, 6, f"NOMBRE TITULAR CUENTA: {datos['nombre_titular']}", 0, 1)
-    pdf.cell(0, 6, f"CÉDULA TITULAR CUENTA: {datos['cedula_titular']}", 0, 1)
+    pdf.cell(0, 6, f"CUENTA # {datos['num_cuenta']} - {datos['tipo_cuenta'].upper()}", 0, 1)
+    pdf.cell(0, 6, f"BANCO: {datos['banco'].upper()}", 0, 1)
+    pdf.cell(0, 6, f"TITULAR: {datos['nombre_titular']} (C.C/NIT: {datos['cedula_titular']})", 0, 1)
     pdf.ln(15)
     
     pdf.set_font("helvetica", "", 11)
     pdf.cell(0, 6, "Atentamente,", 0, 1)
-    pdf.ln(12)
+    pdf.ln(10)
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(80, 5, str(datos['nombre_titular']).upper(), "T", 1, "L")
     pdf.set_font("helvetica", "", 11)
-    pdf.cell(80, 5, f"C.C {datos['cedula_titular']}", 0, 1, "L")
+    pdf.cell(80, 5, f"C.C / NIT {datos['cedula_titular']}", 0, 1, "L")
 
 
 def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.add_page()
-    try:
-        if os.path.exists('sergemLogo_2.png'): pdf.image('sergemLogo_2.png', 10, 8, w=45)
-        elif os.path.exists('sergemLogo.png'): pdf.image('sergemLogo.png', 10, 8, w=45)
-    except: pass
 
     pdf.set_font('helvetica', 'B', 10)
     pdf.cell(0, 5, "DOCUMENTO EQUIVALENTE A LA FACTURA DE VENTA", 0, 1, 'R')
@@ -308,11 +312,15 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.set_font('helvetica', '', 9)
     pdf.cell(100, 6, datos['ciudad'], 1)
     pdf.set_font('helvetica', 'B', 9)
-    pdf.cell(20, 6, "Conductor:", 1)
+    pdf.cell(20, 6, "Conductores:", 1)
     pdf.set_font('helvetica', '', 9)
-    pdf.cell(0, 6, datos['nombre_conductor'][:20], 1, 1)
+    
+    nombres_conds = ", ".join([c['nombre_conductor'] for c in datos['conductores']])
+    if len(nombres_conds) > 25: nombres_conds = nombres_conds[:22] + "..."
+    pdf.cell(0, 6, nombres_conds, 1, 1)
     pdf.ln(6)
 
+    # Detalle de Items (Cantidad = Horas)
     pdf.set_fill_color(227, 0, 15)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font('helvetica', 'B', 9)
@@ -322,16 +330,20 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.cell(35, 6, "V. Unitario", 1, 0, 'C', fill=True)
     pdf.cell(0, 6, "V. Total", 1, 1, 'C', fill=True)
     pdf.set_text_color(0, 0, 0)
-
     pdf.set_font('helvetica', '', 9)
-    pdf.cell(10, 6, "1", 1, 0, 'C')
-    pdf.cell(90, 6, f"Servicio de mensajería - Corte: {datos['corte_fechas']}", 1, 0, 'L')
-    pdf.cell(20, 6, "1", 1, 0, 'C')
-    pdf.cell(35, 6, f"$ {datos['ingreso_base']:,.0f}", 1, 0, 'R')
-    pdf.cell(0, 6, f"$ {datos['ingreso_base']:,.0f}", 1, 1, 'R')
+
+    item_idx = 1
+    for c in datos['conductores']:
+        v_unitario = c['ingreso_base'] / c['horas'] if c['horas'] > 0 else c['ingreso_base']
+        pdf.cell(10, 6, str(item_idx), 1, 0, 'C')
+        pdf.cell(90, 6, f"Servicio mensajería - {c['nombre_conductor'][:25]}", 1, 0, 'L')
+        pdf.cell(20, 6, f"{c['horas']:g}", 1, 0, 'C')
+        pdf.cell(35, 6, f"$ {v_unitario:,.0f}", 1, 0, 'R')
+        pdf.cell(0, 6, f"$ {c['ingreso_base']:,.0f}", 1, 1, 'R')
+        item_idx += 1
 
     if datos.get('fuera_perimetro', 0) > 0:
-        pdf.cell(10, 6, "2", 1, 0, 'C')
+        pdf.cell(10, 6, str(item_idx), 1, 0, 'C')
         pdf.cell(90, 6, "Servicios Fuera de Perímetro", 1, 0, 'L')
         pdf.cell(20, 6, "1", 1, 0, 'C')
         pdf.cell(35, 6, f"$ {datos['fuera_perimetro']:,.0f}", 1, 0, 'R')
@@ -369,12 +381,13 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 8, f"$ {datos['neto_pagar']:,.0f}", 1, 1, 'R', fill=True)
 
-    pdf.ln(15)
+    pdf.ln(12)
     pdf.set_font('helvetica', 'B', 9)
     pdf.cell(80, 5, "________________________________________________", 0, 1)
     pdf.cell(80, 5, "FIRMA PRESTADOR DEL SERVICIO", 0, 1)
     pdf.cell(80, 5, f"C.C. / NIT: {datos['cedula_titular']}", 0, 1)
     pdf.cell(80, 5, f"NOMBRE: {datos['nombre_titular']}", 0, 1)
+
 
 def construir_hoja_documento_equivalente_excel(ws, datos):
     header_font = Font(bold=True, color="FFFFFF")
@@ -384,14 +397,6 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     border_thin = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
     center_align = Alignment(horizontal="center", vertical="center")
     right_align = Alignment(horizontal="right", vertical="center")
-    left_align = Alignment(horizontal="left", vertical="center")
-
-    try:
-        if os.path.exists('sergemLogo_2.png'):
-            img = XLImage('sergemLogo_2.png')
-            img.width = 150; img.height = 60
-            ws.add_image(img, 'B2')
-    except: pass
 
     ws.merge_cells('D2:H4')
     ws['D2'] = "DOCUMENTO EQUIVALENTE A LA FACTURA DE VENTA\n(DECRETO 522 DE 2003)\nDOCUMENTO SOPORTE EN ADQUISICIONES A NO OBLIGADOS A FACTURAR"
@@ -416,7 +421,11 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
 
     ws['B14'] = "Nombre:"; ws['B14'].font = bold_font; ws['C14'] = datos['nombre_titular']; ws.merge_cells('C14:E14')
     ws['G14'] = "C.C / NIT:"; ws['G14'].font = bold_font; ws['H14'] = datos['cedula_titular']
-    ws['G16'] = "Conductor:"; ws['G16'].font = bold_font; ws['H16'] = datos['nombre_conductor']
+    
+    ws['G16'] = "Conductores:"; ws['G16'].font = bold_font
+    nombres_conds = ", ".join([c['nombre_conductor'] for c in datos['conductores']])
+    if len(nombres_conds) > 25: nombres_conds = nombres_conds[:22] + "..."
+    ws['H16'] = nombres_conds
 
     fila = 18
     for i, h in enumerate(["Ítem", "Concepto", "Cantidad", "V. Unitario", "V. Total"]):
@@ -425,19 +434,32 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws.merge_cells(f'C{fila}:E{fila}')
     
     fila += 1
-    ws[f'B{fila}'] = 1; ws[f'C{fila}'] = f"Servicio de mensajería - Corte: {datos['corte_fechas']}"; ws.merge_cells(f'C{fila}:E{fila}')
-    ws[f'F{fila}'] = 1; ws[f'G{fila}'] = datos['ingreso_base']; ws[f'H{fila}'] = datos['ingreso_base']
-    for c in ['B', 'C', 'D', 'E', 'F', 'G', 'H']: ws[f'{c}{fila}'].border = border_thin
-    ws[f'G{fila}'].number_format = '"$"#,##0'; ws[f'H{fila}'].number_format = '"$"#,##0'
+    item_idx = 1
+    for c in datos['conductores']:
+        ws[f'B{fila}'] = item_idx
+        ws[f'C{fila}'] = f"Servicio mensajería - {c['nombre_conductor']}"
+        ws.merge_cells(f'C{fila}:E{fila}')
+        ws[f'F{fila}'] = float(c['horas']) 
+        v_unitario = c['ingreso_base'] / c['horas'] if c['horas'] > 0 else c['ingreso_base']
+        ws[f'G{fila}'] = v_unitario
+        ws[f'H{fila}'] = c['ingreso_base']
+        for col in ['B', 'C', 'D', 'E', 'F', 'G', 'H']: ws[f'{col}{fila}'].border = border_thin
+        ws[f'G{fila}'].number_format = '"$"#,##0'; ws[f'H{fila}'].number_format = '"$"#,##0'
+        fila += 1
+        item_idx += 1
 
     if datos.get('fuera_perimetro', 0) > 0:
-        fila += 1
-        ws[f'B{fila}'] = 2; ws[f'C{fila}'] = "Servicios Fuera de Perímetro"; ws.merge_cells(f'C{fila}:E{fila}')
-        ws[f'F{fila}'] = 1; ws[f'G{fila}'] = datos['fuera_perimetro']; ws[f'H{fila}'] = datos['fuera_perimetro']
-        for c in ['B', 'C', 'D', 'E', 'F', 'G', 'H']: ws[f'{c}{fila}'].border = border_thin
+        ws[f'B{fila}'] = item_idx
+        ws[f'C{fila}'] = "Servicios Fuera de Perímetro"
+        ws.merge_cells(f'C{fila}:E{fila}')
+        ws[f'F{fila}'] = 1
+        ws[f'G{fila}'] = datos['fuera_perimetro']
+        ws[f'H{fila}'] = datos['fuera_perimetro']
+        for col in ['B', 'C', 'D', 'E', 'F', 'G', 'H']: ws[f'{col}{fila}'].border = border_thin
         ws[f'G{fila}'].number_format = '"$"#,##0'; ws[f'H{fila}'].number_format = '"$"#,##0'
+        fila += 1
         
-    fila += 2
+    fila += 1
     totales = [("SUBTOTAL:", datos['ingreso_bruto_total']), ("IVA (19%):", ""), ("RETEIVA:", ""), 
                ("RTE FTE (1%):", -datos['retefuente'] if datos['retefuente']>0 else 0),
                ("RETEICA (1%):", -datos['ica'] if datos['ica']>0 else 0), ("NETO A PAGAR:", datos['neto_pagar'])]
@@ -468,61 +490,110 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws.page_margins.left = 0.5; ws.page_margins.right = 0.5; ws.page_margins.top = 0.5; ws.page_margins.bottom = 0.5
 
 # ==============================================================================
-# PROCESO MATEMÁTICO PRINCIPAL 
+# PROCESO MATEMÁTICO PRINCIPAL (AGRUPADO POR TITULAR)
 # ==============================================================================
-def calcular_valores_conductor(row, df_fuera, corte_seleccionado):
-    ingreso_neto_esperado = limpiar_dinero(row.get('TOTAL A PAGAR', 0))
-    if ingreso_neto_esperado <= 0: return None
-    
-    nombre_conductor = str(row.get('CONDUCTOR', '')).upper().strip()
-    ciudad = str(row.get('CIUDAD', '')).upper().strip()
-    
-    fuera_perimetro_neto = 0.0
-    if not df_fuera.empty and 'TOTAL' in df_fuera.columns and 'CONDUCTOR' in df_fuera.columns:
-        match = df_fuera[(df_fuera['CORTE'].astype(str).str.strip() == corte_seleccionado) & (df_fuera['CONDUCTOR'].astype(str).str.upper().str.strip() == nombre_conductor)]
-        fuera_perimetro_neto = sum(match['TOTAL'].apply(limpiar_dinero))
-    
-    total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
-    
-    porcentaje_retefuente = 0.01
-    porcentaje_ica = 0.01 if ciudad == 'CALI' else 0.0
-    tasa_total_impuestos = porcentaje_retefuente + porcentaje_ica
-    
-    ingreso_bruto_total = round(total_neto_esperado / (1 - tasa_total_impuestos))
-    retefuente = round(ingreso_bruto_total * porcentaje_retefuente)
-    ica = round(ingreso_bruto_total * porcentaje_ica)
-    
-    fuera_perimetro_bruto = round(fuera_perimetro_neto / (1 - tasa_total_impuestos)) if fuera_perimetro_neto > 0 else 0.0
-        
-    ingreso_base_bruta = ingreso_bruto_total - fuera_perimetro_bruto
-    neto_a_pagar = ingreso_bruto_total - retefuente - ica
-    
+def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
+    conductores = []
+    suma_neto = 0
+    suma_bruto = 0
+    suma_fuera_bruto = 0
+    suma_retefuente = 0
+    suma_ica = 0
+    suma_horas = 0
+
+    row_titular = grupo_df.iloc[0]
+    nombre_titular = str(row_titular.get('A NOMBRE DE QUIEN HACE CUENTA DE COBRO', row_titular.get('NOMBRE TITULAR CUENTA BANCARIA', 'S/N'))).strip()
+    cedula_titular = str(row_titular.get('CÉDULA DE CUENTA DE COBRO', row_titular.get('CÉDULA TITULAR', ''))).strip()
+    banco = str(row_titular.get('BANCO', '')).strip()
+    tipo_cuenta = str(row_titular.get('TIPO CUENTA', '')).strip()
+    num_cuenta = str(row_titular.get('NO. CUENTA', '')).strip()
+    ciudad_titular = str(row_titular.get('CIUDAD', '')).upper().strip()
+
+    for _, row in grupo_df.iterrows():
+        ingreso_neto_esperado = limpiar_dinero(row.get('TOTAL A PAGAR', 0))
+        if ingreso_neto_esperado <= 0: continue
+
+        nombre_conductor = str(row.get('CONDUCTOR', '')).upper().strip()
+        ciudad = str(row.get('CIUDAD', '')).upper().strip()
+        cedula_conductor = str(row.get('CEDULA', '')).strip()
+        horas = obtener_horas(row)
+
+        fuera_perimetro_neto = 0.0
+        if not df_fuera.empty and 'TOTAL' in df_fuera.columns and 'CONDUCTOR' in df_fuera.columns:
+            match = df_fuera[(df_fuera['CORTE'].astype(str).str.strip() == corte_seleccionado) & (df_fuera['CONDUCTOR'].astype(str).str.upper().str.strip() == nombre_conductor)]
+            fuera_perimetro_neto = sum(match['TOTAL'].apply(limpiar_dinero))
+
+        total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
+
+        porcentaje_retefuente = 0.01
+        porcentaje_ica = 0.01 if ciudad == 'CALI' else 0.0
+        tasa_total_impuestos = porcentaje_retefuente + porcentaje_ica
+
+        ingreso_bruto_total = round(total_neto_esperado / (1 - tasa_total_impuestos))
+        retefuente = round(ingreso_bruto_total * porcentaje_retefuente)
+        ica = round(ingreso_bruto_total * porcentaje_ica)
+
+        fuera_perimetro_bruto = round(fuera_perimetro_neto / (1 - tasa_total_impuestos)) if fuera_perimetro_neto > 0 else 0.0
+        ingreso_base_bruta = ingreso_bruto_total - fuera_perimetro_bruto
+        neto_a_pagar = ingreso_bruto_total - retefuente - ica
+
+        conductores.append({
+            'nombre_conductor': nombre_conductor,
+            'cedula_conductor': cedula_conductor,
+            'horas': horas,
+            'ingreso_base': ingreso_base_bruta,
+            'fuera_perimetro': fuera_perimetro_bruto,
+            'ingreso_bruto_total': ingreso_bruto_total,
+            'retefuente': retefuente,
+            'ica': ica,
+            'neto_pagar': neto_a_pagar
+        })
+
+        suma_neto += neto_a_pagar
+        suma_bruto += ingreso_bruto_total
+        suma_fuera_bruto += fuera_perimetro_bruto
+        suma_retefuente += retefuente
+        suma_ica += ica
+        suma_horas += horas
+
+    if not conductores: return None
+
     return {
-        'nombre_conductor': nombre_conductor,
-        'ciudad': ciudad,
-        'cedula_conductor': str(row.get('CEDULA', '')).strip(),
-        'nombre_titular': str(row.get('A NOMBRE DE QUIEN HACE CUENTA DE COBRO', row.get('NOMBRE TITULAR CUENTA BANCARIA', 'S/N'))).strip(),
-        'cedula_titular': str(row.get('CÉDULA DE CUENTA DE COBRO', row.get('CÉDULA TITULAR', ''))).strip(),
-        'banco': str(row.get('BANCO', '')).strip(),
-        'tipo_cuenta': str(row.get('TIPO CUENTA', '')).strip(),
-        'num_cuenta': str(row.get('NO. CUENTA', '')).strip(),
-        'ingreso_base': ingreso_base_bruta,
-        'fuera_perimetro': fuera_perimetro_bruto,
-        'ingreso_bruto_total': ingreso_bruto_total,
-        'retefuente': retefuente,
-        'ica': ica,
-        'neto_pagar': neto_a_pagar
+        'nombre_titular': nombre_titular,
+        'cedula_titular': cedula_titular,
+        'banco': banco,
+        'tipo_cuenta': tipo_cuenta,
+        'num_cuenta': num_cuenta,
+        'ciudad': ciudad_titular,
+        'conductores': conductores,
+        'ingreso_base': suma_bruto - suma_fuera_bruto,
+        'fuera_perimetro': suma_fuera_bruto,
+        'ingreso_bruto_total': suma_bruto,
+        'retefuente': suma_retefuente,
+        'ica': suma_ica,
+        'neto_pagar': suma_neto,
+        'total_horas': suma_horas
     }
+
+def obtener_nombre_columna(df, opciones):
+    for op in opciones:
+        if op in df.columns: return op
+    return None
 
 # ==============================================================================
 # INTERFAZ DE USUARIO
 # ==============================================================================
-col1, col2 = st.columns([1.5, 3.5])
+# Ajustamos las columnas para mostrar el logo a la izquierda del título en la web
+col1, col2 = st.columns([1, 4])
 with col1:
-    try: st.image("sergemLogo_2.png", width=250)
-    except: pass
+    try:
+        if os.path.exists("sergemLogo.png"):
+            st.image("sergemLogo.png", use_column_width=True)
+        elif os.path.exists("sergemLogo_2.png"):
+            st.image("sergemLogo_2.png", use_column_width=True)
+    except:
+        pass
 with col2:
-    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
     st.title("Generador Automático de Documentos")
     st.markdown("**SERGEM Mensajería S.A.S.**")
 
@@ -545,13 +616,20 @@ if df_pagos_completo.empty:
 df_pagos_completo.columns = df_pagos_completo.columns.str.strip().str.upper()
 if not df_fuera.empty: df_fuera.columns = df_fuera.columns.str.strip().str.upper()
 
+col_titular = obtener_nombre_columna(df_pagos_completo, ['A NOMBRE DE QUIEN HACE CUENTA DE COBRO', 'NOMBRE TITULAR CUENTA BANCARIA', 'NOMBRE_TITULAR'])
+col_cedula_titular = obtener_nombre_columna(df_pagos_completo, ['CÉDULA DE CUENTA DE COBRO', 'CÉDULA TITULAR', 'CEDULA_TITULAR'])
+
+if not col_titular or not col_cedula_titular:
+    st.error("No se encontraron las columnas de TITULAR o CÉDULA en el Excel.")
+    st.stop()
+
 cortes_disponibles = [c for c in df_pagos_completo['CORTE'].unique() if str(c).strip() != "" and str(c).lower() != "nan"]
 corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar:", cortes_disponibles)
 
 st.divider()
 modo_trabajo = st.radio("⚙️ Modo de trabajo:", 
-                        ["🗂️ Generación Masiva (Todos los conductores del corte)", 
-                         "👤 Vista Previa Individual (Revisar un conductor específico)"], horizontal=True)
+                        ["🗂️ Generación Masiva (Todos los titulares del corte)", 
+                         "👤 Vista Previa Individual (Revisar un titular específico)"], horizontal=True)
 
 df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado]
 
@@ -559,24 +637,25 @@ df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccion
 # MODO INDIVIDUAL
 # ==============================================================================
 if "Individual" in modo_trabajo:
-    lista_conductores = sorted(df_pagos_corte['CONDUCTOR'].dropna().unique().tolist())
-    cond_seleccionado = st.selectbox("Busque o seleccione el conductor:", lista_conductores)
+    titulares_unicos = df_pagos_corte[[col_cedula_titular, col_titular]].dropna().drop_duplicates()
+    lista_opciones = [f"{row[col_titular]} (C.C/NIT: {row[col_cedula_titular]})" for _, row in titulares_unicos.iterrows()]
+    opcion_seleccionada = st.selectbox("Busque o seleccione el titular de la cuenta:", sorted(lista_opciones))
     
     if st.button("🔍 Calcular y Previsualizar"):
-        row_conductor = df_pagos_corte[df_pagos_corte['CONDUCTOR'] == cond_seleccionado].iloc[0]
-        calculos = calcular_valores_conductor(row_conductor, df_fuera, corte_seleccionado)
+        ced_seleccionada = opcion_seleccionada.split("(C.C/NIT: ")[1].replace(")", "").strip()
+        grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular].astype(str).str.strip() == ced_seleccionada]
+        
+        calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado)
         
         if not calculos:
-            st.warning("Este conductor tiene saldo neto en $0 para este corte.")
+            st.warning("Este titular tiene saldo neto en $0 para este corte.")
         else:
-            st.markdown(f"### Resumen Financiero: {calculos['nombre_titular']}")
+            st.markdown(f"### Resumen Financiero: {calculos['nombre_titular']} (Conductores: {len(calculos['conductores'])})")
             cA, cB, cC, cD = st.columns(4)
             cA.markdown(f"<div class='metric-box'><b>BASE BRUTA</b><br>${calculos['ingreso_base']:,.0f}</div>", unsafe_allow_html=True)
             cB.markdown(f"<div class='metric-box'><b>RETEFUENTE (1%)</b><br>${calculos['retefuente']:,.0f}</div>", unsafe_allow_html=True)
             cC.markdown(f"<div class='metric-box'><b>RETEICA</b><br>${calculos['ica']:,.0f}</div>", unsafe_allow_html=True)
             cD.markdown(f"<div class='metric-box' style='background-color:#E3000F; color:white;'><b>NETO EXACTO</b><br>${calculos['neto_pagar']:,.0f}</div>", unsafe_allow_html=True)
-            
-            st.info("💡 El sistema ha inflado la base bruta automáticamente para que al descontar los impuestos, el resultado sea exactamente el que usted parametrizó en el Excel de origen.")
             
             datos_doc = calculos.copy()
             datos_doc.update({'id': "PREVIEW", 'fecha_emision': obtener_fecha_actual(), 'corte_fechas': corte_seleccionado})
@@ -591,8 +670,8 @@ if "Individual" in modo_trabajo:
             pdf_eq_bytes = out_eq.encode('latin-1') if isinstance(out_eq, str) else bytes(out_eq)
             
             colBtn1, colBtn2 = st.columns(2)
-            colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=pdf_ct_bytes, file_name=f"Cuenta_{cond_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
-            colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq_bytes, file_name=f"DocEq_{cond_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
+            colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=pdf_ct_bytes, file_name=f"Cuenta_{ced_seleccionada}.pdf", mime="application/pdf", use_container_width=True)
+            colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq_bytes, file_name=f"DocEq_{ced_seleccionada}.pdf", mime="application/pdf", use_container_width=True)
 
 # ==============================================================================
 # MODO MASIVO (LOTE)
@@ -614,9 +693,12 @@ else:
             
             contador = 1
             
+            cedulas_unicas = df_pagos_corte[col_cedula_titular].dropna().unique()
+            
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for index, row in df_pagos_corte.iterrows():
-                    calculos = calcular_valores_conductor(row, df_fuera, corte_seleccionado)
+                for cedula in cedulas_unicas:
+                    grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular] == cedula]
+                    calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado)
                     
                     if not calculos:
                         ignorados += 1
@@ -646,25 +728,21 @@ else:
                 
                 out_maestro_cuentas = pdf_maestro_cuentas.output()
                 pdf_maestro_ct_bytes = out_maestro_cuentas.encode('latin-1') if isinstance(out_maestro_cuentas, str) else bytes(out_maestro_cuentas)
-                zip_file.writestr("1_IMPRESION_MASIVA_Cuentas_de_Cobro.pdf", pdf_maestro_ct_bytes)
+                zip_file.writestr("1_SUPER_IMPRESION_Cuentas_de_Cobro.pdf", pdf_maestro_ct_bytes)
                 
                 out_maestro_eq = pdf_maestro_equivalentes.output()
                 pdf_maestro_eq_bytes = out_maestro_eq.encode('latin-1') if isinstance(out_maestro_eq, str) else bytes(out_maestro_eq)
-                zip_file.writestr("2_IMPRESION_MASIVA_Documentos_Equivalentes.pdf", pdf_maestro_eq_bytes)
+                zip_file.writestr("2_SUPER_IMPRESION_Documentos_Equivalentes.pdf", pdf_maestro_eq_bytes)
                 
                 excel_maestro_io = io.BytesIO()
                 wb_maestro_equivalentes.save(excel_maestro_io)
                 excel_maestro_io.seek(0)
                 zip_file.writestr("3_ARCHIVO_Documentos_Equivalentes_Pestañas.xlsx", excel_maestro_io.read())
                 
-                # --- NUEVA INTEGRACIÓN: ARCHIVO PLANO EN TXT Y FORMATO EN EXCEL ---
                 df_banco = pd.DataFrame(pagos_procesados_banco)
-                
-                # 1. Archivo Plano (.txt) estructurado para subir al portal
                 texto_banco = generar_txt_banco(df_banco)
                 zip_file.writestr(f"4_PLANO_BANCARIO_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.txt", texto_banco)
 
-                # 2. Archivo en Excel para revisión visual de Yesenia
                 excel_banco_io = io.BytesIO()
                 df_banco.to_excel(excel_banco_io, index=False, sheet_name="PLANO_BANCO")
                 excel_banco_io.seek(0)
@@ -672,7 +750,7 @@ else:
             
             zip_buffer.seek(0)
             mensaje_carga.empty() 
-            st.success(f"✅ ¡Éxito! Archivos listos para imprimir con 1 solo clic. {len(df_banco)} conductores procesados. ({ignorados} omitidos por saldo $0).")
+            st.success(f"✅ ¡Éxito! Archivos listos para imprimir. {len(df_banco)} pagos (titulares) procesados. ({ignorados} omitidos por saldo $0).")
             
             if len(df_banco) > 0:
                 st.download_button(
