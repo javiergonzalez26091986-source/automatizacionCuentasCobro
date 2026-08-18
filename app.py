@@ -114,8 +114,7 @@ class PDFCuentaCobro(FPDF):
         self.cell(0, 5, 'NIT. 900.561.833-1', 0, 1, 'R')
         self.ln(15)
 
-def generar_pdf_cuenta_cobro(datos):
-    pdf = PDFCuentaCobro()
+def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.add_page()
     
     pdf.set_text_color(0, 0, 0)
@@ -190,14 +189,8 @@ def generar_pdf_cuenta_cobro(datos):
     pdf.cell(80, 5, str(datos['nombre_titular']).upper(), "T", 1, "L")
     pdf.set_font("helvetica", "", 11)
     pdf.cell(80, 5, f"C.C {datos['cedula_titular']}", 0, 1, "L")
-    
-    return pdf.output()
 
-def generar_excel_documento_equivalente(datos):
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Documento Equivalente"
-
+def construir_hoja_documento_equivalente(ws, datos):
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="E3000F", end_color="E3000F", fill_type="solid")
     dark_fill = PatternFill(start_color="333333", end_color="333333", fill_type="solid")
@@ -405,7 +398,6 @@ def generar_excel_documento_equivalente(datos):
     ws.column_dimensions['G'].width = 22
     ws.column_dimensions['H'].width = 22
 
-    # --- INICIO BLOQUE NUEVO: CONFIGURACIÓN DE IMPRESIÓN (AJUSTE AUTOMÁTICO) ---
     ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
     ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
     ws.page_setup.fitToPage = True
@@ -418,12 +410,6 @@ def generar_excel_documento_equivalente(datos):
     ws.page_margins.right = 0.5
     ws.page_margins.top = 0.5
     ws.page_margins.bottom = 0.5
-    # --- FIN BLOQUE NUEVO ---
-
-    excel_io = io.BytesIO()
-    wb.save(excel_io)
-    excel_io.seek(0)
-    return excel_io.read()
 
 def limpiar_dinero(val):
     if pd.isna(val) or val == "":
@@ -494,13 +480,18 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True, ty
     mensaje_carga = st.info(f"📥 Procesando la información para el corte: {corte_seleccionado}...")
     
     try:
-        # Filtramos la tabla solo con el corte seleccionado
         df_pagos = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado]
         
         pagos_procesados = []
         ignorados = 0
         zip_buffer = io.BytesIO()
         fecha_actual = obtener_fecha_actual() 
+        
+        # Inicializamos los objetos para los archivos maestros consolidados
+        pdf_maestro = PDFCuentaCobro()
+        wb_maestro = openpyxl.Workbook()
+        # Eliminamos la hoja por defecto del workbook maestro para ir creándola limpia
+        wb_maestro.remove(wb_maestro.active)
         
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             contador = 1
@@ -526,8 +517,6 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True, ty
 
                 ingreso_bruto_total = ingreso_base + fuera_perimetro
                 
-                # --- CORRECCIÓN DE DECIMALES ---
-                # Aplicamos el redondeo ANTES de hacer la resta
                 retefuente = round(ingreso_bruto_total * 0.01)
                 ica = round(ingreso_bruto_total * 0.01) if ciudad == 'CALI' else 0.0
                 neto_a_pagar = ingreso_bruto_total - retefuente - ica
@@ -567,10 +556,27 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True, ty
                     'num_cuenta': num_cuenta
                 }
 
-                zip_file.writestr(f"Cuentas_Cobro/{contador}_{nombre_titular.replace(' ', '_')}_Cuenta.pdf", generar_pdf_cuenta_cobro(datos_doc))
-                zip_file.writestr(f"Docs_Equivalentes/{contador}_{nombre_titular.replace(' ', '_')}_DocEq.xlsx", generar_excel_documento_equivalente(datos_doc))
+                # 1. Alimentamos el PDF Maestro (todas las cuentas de cobro en un solo archivo)
+                agregar_pagina_pdf_cuenta_cobro(pdf_maestro, datos_doc)
+
+                # 2. Alimentamos el Excel Maestro (una pestaña por cada documento equivalente)
+                nombre_pestana = f"{contador}_{nombre_titular[:20]}".replace(":", "").replace("/", "-")
+                ws_nuevo = wb_maestro.create_sheet(title=nombre_pestana)
+                construir_hoja_documento_equivalente(ws_nuevo, datos_doc)
+
                 contador += 1
             
+            # Guardamos el PDF Maestro dentro del ZIP
+            pdf_maestro_bytes = pdf_maestro.output()
+            zip_file.writestr("00_TODAS_LAS_CUENTAS_DE_COBRO.pdf", pdf_maestro_bytes)
+
+            # Guardamos el Excel Maestro dentro del ZIP
+            excel_maestro_io = io.BytesIO()
+            wb_maestro.save(excel_maestro_io)
+            excel_maestro_io.seek(0)
+            zip_file.writestr("00_TODOS_LOS_DOCUMENTOS_EQUIVALENTES.xlsx", excel_maestro_io.read())
+            
+            # Guardamos el archivo plano bancario
             df_resultado = pd.DataFrame(pagos_procesados)
             zip_file.writestr(f"Archivo_Plano_Bancario_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.csv", df_resultado.to_csv(index=False, sep=';', encoding='utf-8-sig'))
         
