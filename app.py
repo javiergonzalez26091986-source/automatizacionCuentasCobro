@@ -407,10 +407,9 @@ col1, col2 = st.columns([1.5, 3.5])
 with col1:
     try:
         # Usamos el nuevo archivo y aumentamos el ancho a 250 (o el valor que prefieras)
-        st.image("sergemLogo_2.png", width=250) 
+        st.image("sergemLogo.png", width=250) 
         
-        # Alternativa: Si quieres que sea responsivo al 100% de la columna usa esto:
-        # st.image("sergemLogo_2.png", use_container_width=True)
+        
     except:
         pass
 
