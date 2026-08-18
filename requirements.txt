@@ -1,5 +1,5 @@
 streamlit
 pandas
 requests
-weasyprint
+fpdf2
 openpyxl
