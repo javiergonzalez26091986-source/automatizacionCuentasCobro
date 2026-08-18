@@ -523,7 +523,7 @@ with col1:
     except: pass
 with col2:
     st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-    st.title("Generador Automático de Pagos")
+    st.title("Generador Automático de Documentos")
     st.markdown("**SERGEM Mensajería S.A.S.**")
 
 if st.button("🔄 Sincronizar Base de Datos", key="btn_sync", type="secondary"):
@@ -646,11 +646,11 @@ else:
                 
                 out_maestro_cuentas = pdf_maestro_cuentas.output()
                 pdf_maestro_ct_bytes = out_maestro_cuentas.encode('latin-1') if isinstance(out_maestro_cuentas, str) else bytes(out_maestro_cuentas)
-                zip_file.writestr("1_SUPER_IMPRESION_Cuentas_de_Cobro.pdf", pdf_maestro_ct_bytes)
+                zip_file.writestr("1_IMPRESION_MASIVA_Cuentas_de_Cobro.pdf", pdf_maestro_ct_bytes)
                 
                 out_maestro_eq = pdf_maestro_equivalentes.output()
                 pdf_maestro_eq_bytes = out_maestro_eq.encode('latin-1') if isinstance(out_maestro_eq, str) else bytes(out_maestro_eq)
-                zip_file.writestr("2_SUPER_IMPRESION_Documentos_Equivalentes.pdf", pdf_maestro_eq_bytes)
+                zip_file.writestr("2_IMPRESION_MASIVA_Documentos_Equivalentes.pdf", pdf_maestro_eq_bytes)
                 
                 excel_maestro_io = io.BytesIO()
                 wb_maestro_equivalentes.save(excel_maestro_io)
