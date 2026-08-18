@@ -90,7 +90,7 @@ def obtener_fecha_actual():
     return f"{hoy.day} DE {meses[hoy.month - 1]} DE {hoy.year}"
 
 # --- FUNCIÓN PARA CARGAR DATOS CON CACHÉ ---
-@st.cache_data(ttl=600) # Se actualiza cada 10 min, salvo que se fuerce la sincronización
+@st.cache_data(ttl=600) 
 def cargar_datos(url):
     try:
         response = requests.get(url)
@@ -414,8 +414,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# BOTÓN PARA FORZAR LA SINCRONIZACIÓN
-if st.button("🔄 Sincronizar Base de Datos", key="btn_sync", kind="secondary"):
+# BOTÓN PARA FORZAR LA SINCRONIZACIÓN (Aquí estaba el error de kind/type)
+if st.button("🔄 Sincronizar Base de Datos", key="btn_sync", type="secondary"):
     st.cache_data.clear()
     st.rerun()
 
@@ -450,8 +450,8 @@ else:
     st.error("No se encontró la columna 'CORTE' en la hoja de Google Sheets.")
     st.stop()
 
-# 3. BOTÓN DE PROCESAMIENTO
-if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True, kind="primary"):
+# 3. BOTÓN DE PROCESAMIENTO (También actualizado kind a type)
+if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True, type="primary"):
     
     mensaje_carga = st.info(f"📥 Procesando la información para el corte: {corte_seleccionado}...")
     
@@ -480,12 +480,10 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True, ki
                 fuera_perimetro = 0.0
                 if "MILTON" in nombre_conductor and not df_fuera.empty:
                     if 'TOTAL' in df_fuera.columns:
-                        # Aseguramos que solo sume los valores extras de ese corte
                         if 'CORTE' in df_fuera.columns:
                             match = df_fuera[df_fuera['CORTE'].astype(str).str.strip() == corte_seleccionado]
                             fuera_perimetro = sum(match['TOTAL'].apply(limpiar_dinero))
                         else:
-                            # Si la hoja no tiene columna CORTE, asume que todo lo que hay es para cobrar (no recomendado a futuro)
                             fuera_perimetro = sum(df_fuera['TOTAL'].apply(limpiar_dinero))
 
                 ingreso_bruto_total = ingreso_base + fuera_perimetro
