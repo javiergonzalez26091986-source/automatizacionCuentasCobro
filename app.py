@@ -145,6 +145,25 @@ def generar_pdf_cuenta_cobro(datos):
         pdf.set_font("helvetica", "", 11)
         pdf.cell(0, 6, f"$ {datos['fuera_perimetro']:,.0f}", 0, 1)
 
+    # --- INICIO BLOQUE NUEVO: Mostrar Retenciones ---
+    if datos.get('retefuente', 0) > 0:
+        pdf.set_font("helvetica", "B", 11)
+        pdf.cell(80, 6, "MENOS RETEFUENTE (1%):", 0, 0)
+        pdf.set_font("helvetica", "", 11)
+        pdf.set_text_color(227, 0, 15) # Color rojo corporativo para el descuento
+        pdf.cell(0, 6, f"$ -{datos['retefuente']:,.0f}", 0, 1)
+        pdf.set_text_color(0, 0, 0)
+
+    if datos.get('ica', 0) > 0:
+        pdf.set_font("helvetica", "B", 11)
+        pdf.cell(80, 6, "MENOS RETEICA (1%):", 0, 0)
+        pdf.set_font("helvetica", "", 11)
+        pdf.set_text_color(227, 0, 15) # Color rojo corporativo para el descuento
+        pdf.cell(0, 6, f"$ -{datos['ica']:,.0f}", 0, 1)
+        pdf.set_text_color(0, 0, 0)
+    # --- FIN BLOQUE NUEVO ---
+
+    pdf.ln(2)
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(80, 8, "VALOR TOTAL NETO A PAGAR:", 0, 0)
     pdf.cell(0, 8, f"$ {datos['neto_pagar']:,.0f}", 0, 1)
@@ -343,14 +362,20 @@ def generar_excel_documento_equivalente(datos):
         ws[f'H{fila}'].number_format = '"$"#,##0'
         
     fila += 2
+    
+    # --- INICIO BLOQUE NUEVO: Manejo limpio de ceros para Excel ---
+    retefuente_val = -datos['retefuente'] if datos.get('retefuente', 0) > 0 else 0
+    ica_val = -datos['ica'] if datos.get('ica', 0) > 0 else 0
+
     totales = [
         ("SUBTOTAL:", datos['ingreso_bruto_total']),
         ("IVA (19%):", ""), 
         ("RETEIVA:", ""), 
-        ("RTE FTE (1%):", -datos['retefuente']),
-        ("RETEICA (1%):", -datos['ica']),
+        ("RTE FTE (1%):", retefuente_val),
+        ("RETEICA (1%):", ica_val),
         ("NETO A PAGAR:", datos['neto_pagar'])
     ]
+    # --- FIN BLOQUE NUEVO ---
     
     fila_firma = fila + 1
 
