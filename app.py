@@ -86,7 +86,6 @@ GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp
 # --- OBTENER FECHA ACTUAL EN FORMATO COLOMBIANO ---
 def obtener_fecha_actual():
     meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
-    # Configuración de zona horaria para Colombia (UTC -5)
     zona_colombia = timezone(timedelta(hours=-5))
     hoy = datetime.now(zona_colombia)
     return f"{hoy.day} DE {meses[hoy.month - 1]} DE {hoy.year}"
@@ -145,12 +144,11 @@ def generar_pdf_cuenta_cobro(datos):
         pdf.set_font("helvetica", "", 11)
         pdf.cell(0, 6, f"$ {datos['fuera_perimetro']:,.0f}", 0, 1)
 
-    # --- INICIO BLOQUE NUEVO: Mostrar Retenciones ---
     if datos.get('retefuente', 0) > 0:
         pdf.set_font("helvetica", "B", 11)
         pdf.cell(80, 6, "MENOS RETEFUENTE (1%):", 0, 0)
         pdf.set_font("helvetica", "", 11)
-        pdf.set_text_color(227, 0, 15) # Color rojo corporativo para el descuento
+        pdf.set_text_color(227, 0, 15)
         pdf.cell(0, 6, f"$ -{datos['retefuente']:,.0f}", 0, 1)
         pdf.set_text_color(0, 0, 0)
 
@@ -158,10 +156,9 @@ def generar_pdf_cuenta_cobro(datos):
         pdf.set_font("helvetica", "B", 11)
         pdf.cell(80, 6, "MENOS RETEICA (1%):", 0, 0)
         pdf.set_font("helvetica", "", 11)
-        pdf.set_text_color(227, 0, 15) # Color rojo corporativo para el descuento
+        pdf.set_text_color(227, 0, 15)
         pdf.cell(0, 6, f"$ -{datos['ica']:,.0f}", 0, 1)
         pdf.set_text_color(0, 0, 0)
-    # --- FIN BLOQUE NUEVO ---
 
     pdf.ln(2)
     pdf.set_font("helvetica", "B", 12)
@@ -227,7 +224,6 @@ def generar_excel_documento_equivalente(datos):
     ws['D2'].font = Font(bold=True, size=11, color="1E293B")
     ws['D2'].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # Configuración de zona horaria para Colombia (UTC -5)
     zona_colombia = timezone(timedelta(hours=-5))
     hoy = datetime.now(zona_colombia)
     
@@ -363,7 +359,6 @@ def generar_excel_documento_equivalente(datos):
         
     fila += 2
     
-    # --- INICIO BLOQUE NUEVO: Manejo limpio de ceros para Excel ---
     retefuente_val = -datos['retefuente'] if datos.get('retefuente', 0) > 0 else 0
     ica_val = -datos['ica'] if datos.get('ica', 0) > 0 else 0
 
@@ -375,7 +370,6 @@ def generar_excel_documento_equivalente(datos):
         ("RETEICA (1%):", ica_val),
         ("NETO A PAGAR:", datos['neto_pagar'])
     ]
-    # --- FIN BLOQUE NUEVO ---
     
     fila_firma = fila + 1
 
@@ -410,6 +404,21 @@ def generar_excel_documento_equivalente(datos):
     ws.column_dimensions['F'].width = 10
     ws.column_dimensions['G'].width = 22
     ws.column_dimensions['H'].width = 22
+
+    # --- INICIO BLOQUE NUEVO: CONFIGURACIÓN DE IMPRESIÓN (AJUSTE AUTOMÁTICO) ---
+    ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+    ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_options.horizontalCentered = True
+    
+    ws.page_margins.left = 0.5
+    ws.page_margins.right = 0.5
+    ws.page_margins.top = 0.5
+    ws.page_margins.bottom = 0.5
+    # --- FIN BLOQUE NUEVO ---
 
     excel_io = io.BytesIO()
     wb.save(excel_io)
@@ -517,8 +526,10 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True, ty
 
                 ingreso_bruto_total = ingreso_base + fuera_perimetro
                 
-                retefuente = ingreso_bruto_total * 0.01
-                ica = ingreso_bruto_total * 0.01 if ciudad == 'CALI' else 0.0
+                # --- CORRECCIÓN DE DECIMALES ---
+                # Aplicamos el redondeo ANTES de hacer la resta
+                retefuente = round(ingreso_bruto_total * 0.01)
+                ica = round(ingreso_bruto_total * 0.01) if ciudad == 'CALI' else 0.0
                 neto_a_pagar = ingreso_bruto_total - retefuente - ica
                 
                 nombre_titular = str(row.get('A NOMBRE DE QUIEN HACE CUENTA DE COBRO', row.get('NOMBRE TITULAR CUENTA BANCARIA', 'S/N'))).strip()
