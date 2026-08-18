@@ -3,12 +3,11 @@ import pandas as pd
 import requests
 import io
 import zipfile
-import base64
-from weasyprint import HTML
+import os
+from fpdf import FPDF
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.drawing.image import Image as XLImage
-import os
 
 # 1. Configuración de la página
 st.set_page_config(page_title="SERGEM - Nómina y Cuentas", page_icon="sergemLogo.ico", layout="wide")
@@ -50,83 +49,113 @@ st.markdown("""
 # --- URL INTEGRADA (Oculta al usuario) ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp40hdIzJeEm4dKNLBgDVxwEY95T0EIoBu_qo8FB/exec"
 
-# --- FUNCIONES DE GENERACIÓN ---
-@st.cache_data
-def get_base64_logo():
-    try:
-        with open('sergemLogo.png', 'rb') as f:
-            return base64.b64encode(f.read()).decode('utf-8')
-    except Exception:
-        return ""
+# --- CLASE PARA PDF CON FPDF2 ---
+class PDFCuentaCobro(FPDF):
+    def header(self):
+        try:
+            if os.path.exists('sergemLogo.png'):
+                self.image('sergemLogo.png', 10, 8, 35)
+        except:
+            pass
+        self.set_font('helvetica', 'B', 14)
+        self.set_text_color(51, 51, 51)
+        self.cell(0, 8, 'SERGEM MENSAJERIA S.A.S.', 0, 1, 'R')
+        self.set_font('helvetica', '', 9)
+        self.set_text_color(119, 119, 119)
+        self.cell(0, 5, 'NIT. 900.561.833-1', 0, 1, 'R')
+        self.ln(10)
 
-LOGO_B64 = get_base64_logo()
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('helvetica', 'I', 8)
+        self.set_text_color(150, 150, 150)
+        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def generar_pdf_cuenta_cobro(datos):
-    html_content = f'''
-    <html>
-    <head>
-    <style>
-        @page {{ size: Letter; margin: 20mm; background-color: #ffffff; }}
-        body {{ font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; }}
-        .header {{ display: flex; align-items: center; border-bottom: 2px solid #E3000F; padding-bottom: 10px; margin-bottom: 20px; }}
-        .header img {{ width: 180px; }}
-        .header-text {{ margin-left: 20px; text-align: right; width: 100%; }}
-        .header-text h1 {{ margin: 0; font-size: 16pt; color: #333; }}
-        .header-text p {{ margin: 0; font-size: 10pt; color: #777; }}
-        .title {{ font-size: 18pt; font-weight: bold; color: #E3000F; text-align: center; margin-top: 10px; margin-bottom: 5px; }}
-        .subtitle {{ text-align: center; font-size: 11pt; color: #555; margin-bottom: 30px; }}
-        .content {{ font-size: 11pt; line-height: 1.6; }}
-        .box {{ border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-top: 20px; background-color: #fdfbf7; }}
-        .box p {{ margin: 5px 0; }}
-        .total {{ font-size: 16pt; font-weight: bold; color: #E3000F; text-align: right; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px; }}
-        .bank-info {{ margin-top: 20px; background-color: #f4f4f4; padding: 15px; border-left: 4px solid #E3000F; }}
-        .signature {{ margin-top: 80px; border-top: 1px solid #333; width: 250px; padding-top: 5px; text-align: center; font-weight: bold; }}
-    </style>
-    </head>
-    <body>
-        <div class="header">
-            <img src="data:image/png;base64,{LOGO_B64}" />
-            <div class="header-text">
-                <h1>SERGEM MENSAJERIA S.A.S.</h1>
-                <p>NIT. 900.561.833-1</p>
-            </div>
-        </div>
-        <div class="title">CUENTA DE COBRO</div>
-        <div class="subtitle">Documento No. {datos['id']} | Fecha: {datos['fecha_actual']}</div>
-        <div class="content">
-            <p><strong>DEBE A:</strong></p>
-            <p style="font-size: 14pt; font-weight: bold; margin: 5px 0;">{datos['nombre_titular']}</p>
-            <p style="margin: 0;">C.C. {datos['cedula_titular']}</p>
-            
-            <div class="box">
-                <p><strong>Concepto:</strong> Servicio de mensajería prestado en el corte del {datos['corte_fechas']}.</p>
-                <p><strong>Conductor:</strong> {datos['nombre_conductor']} (C.C. {datos['cedula_conductor']})</p>
-                <p><strong>Ciudad de Operación:</strong> {datos['ciudad']}</p>
-                <br>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <tr><td style="padding: 5px 0;">Valor Base Negociado:</td><td style="text-align: right;">$ {datos['ingreso_bruto']:,.0f}</td></tr>
-                    <tr><td style="padding: 5px 0; color: #d9534f;">Retención en la Fuente (1%):</td><td style="text-align: right; color: #d9534f;">- $ {datos['retefuente']:,.0f}</td></tr>
-                    <tr><td style="padding: 5px 0; color: #d9534f;">Descuento ICA (1%):</td><td style="text-align: right; color: #d9534f;">- $ {datos['ica']:,.0f}</td></tr>
-                </table>
-                <div class="total">NETO A PAGAR: $ {datos['neto_pagar']:,.0f}</div>
-            </div>
-
-            <div class="bank-info">
-                <p style="margin:0 0 10px 0;"><strong>Por favor consignar en la siguiente cuenta bancaria:</strong></p>
-                <p style="margin: 2px 0;"><strong>Banco:</strong> {datos['banco']}</p>
-                <p style="margin: 2px 0;"><strong>Tipo de Cuenta:</strong> {datos['tipo_cuenta']}</p>
-                <p style="margin: 2px 0;"><strong>Número:</strong> {datos['num_cuenta']}</p>
-                <p style="margin: 2px 0;"><strong>Titular:</strong> {datos['nombre_titular']}</p>
-            </div>
-
-            <div class="signature">
-                {datos['nombre_titular']}<br>C.C. {datos['cedula_titular']}
-            </div>
-        </div>
-    </body>
-    </html>
-    '''
-    return HTML(string=html_content).write_pdf()
+    pdf = PDFCuentaCobro()
+    pdf.add_page()
+    
+    # Título
+    pdf.set_font("helvetica", "B", 16)
+    pdf.set_text_color(227, 0, 15)
+    pdf.cell(0, 8, "CUENTA DE COBRO", 0, 1, "C")
+    
+    pdf.set_font("helvetica", "", 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, f"Documento No. {datos['id']} | Fecha: {datos['fecha_actual']}", 0, 1, "C")
+    pdf.ln(8)
+    
+    # Debe a
+    pdf.set_text_color(51, 51, 51)
+    pdf.set_font("helvetica", "B", 10)
+    pdf.cell(0, 5, "DEBE A:", 0, 1)
+    
+    pdf.set_font("helvetica", "B", 13)
+    pdf.cell(0, 6, datos['nombre_titular'], 0, 1)
+    pdf.set_font("helvetica", "", 10)
+    pdf.cell(0, 6, f"C.C. {datos['cedula_titular']}", 0, 1)
+    pdf.ln(5)
+    
+    # Caja de detalles
+    start_y = pdf.get_y()
+    pdf.set_fill_color(253, 251, 247)
+    pdf.set_draw_color(221, 221, 221)
+    pdf.rect(10, start_y, 190, 75, style='FD')
+    
+    pdf.set_xy(15, start_y + 5)
+    pdf.set_font("helvetica", "", 10)
+    pdf.cell(0, 6, f"Concepto: Servicio de mensajería prestado en el corte del {datos['corte_fechas']}.", 0, 1)
+    pdf.set_x(15)
+    pdf.cell(0, 6, f"Conductor: {datos['nombre_conductor']} (C.C. {datos['cedula_conductor']})", 0, 1)
+    pdf.set_x(15)
+    pdf.cell(0, 6, f"Ciudad de Operación: {datos['ciudad']}", 0, 1)
+    pdf.ln(4)
+    
+    pdf.set_x(15)
+    pdf.cell(90, 6, "Valor Base Negociado:", 0, 0)
+    pdf.cell(85, 6, f"$ {datos['ingreso_bruto']:,.0f}", 0, 1, "R")
+    
+    pdf.set_x(15)
+    pdf.set_text_color(217, 83, 79)
+    pdf.cell(90, 6, "Retención en la Fuente (1%):", 0, 0)
+    pdf.cell(85, 6, f"- $ {datos['retefuente']:,.0f}", 0, 1, "R")
+    
+    pdf.set_x(15)
+    pdf.cell(90, 6, "Descuento ICA (1%):", 0, 0)
+    pdf.cell(85, 6, f"- $ {datos['ica']:,.0f}", 0, 1, "R")
+    
+    pdf.set_text_color(51, 51, 51)
+    pdf.set_x(15)
+    pdf.set_font("helvetica", "B", 11)
+    pdf.set_text_color(227, 0, 15)
+    pdf.cell(90, 8, "NETO A PAGAR:", "T", 0)
+    pdf.cell(85, 8, f"$ {datos['neto_pagar']:,.0f}", "T", 1, "R")
+    
+    # Info Bancaria
+    pdf.set_xy(10, start_y + 80)
+    pdf.set_text_color(51, 51, 51)
+    pdf.set_fill_color(244, 244, 244)
+    pdf.rect(10, pdf.get_y(), 190, 32, style='FD')
+    
+    pdf.set_xy(15, pdf.get_y() + 3)
+    pdf.set_font("helvetica", "B", 10)
+    pdf.cell(0, 5, "Por favor consignar en la siguiente cuenta bancaria:", 0, 1)
+    pdf.set_font("helvetica", "", 10)
+    pdf.set_x(15)
+    pdf.cell(0, 5, f"Banco: {datos['banco']}  |  Tipo: {datos['tipo_cuenta']}  |  Número: {datos['num_cuenta']}", 0, 1)
+    pdf.set_x(15)
+    pdf.cell(0, 5, f"Titular: {datos['nombre_titular']}", 0, 1)
+    
+    # Firma
+    pdf.ln(20)
+    pdf.set_x(15)
+    pdf.set_font("helvetica", "B", 10)
+    pdf.cell(80, 5, datos['nombre_titular'], "T", 1, "C")
+    pdf.set_x(15)
+    pdf.set_font("helvetica", "", 9)
+    pdf.cell(80, 5, f"C.C. {datos['cedula_titular']}", 0, 1, "C")
+    
+    return pdf.output()
 
 def generar_excel_documento_equivalente(datos):
     wb = openpyxl.Workbook()
@@ -250,7 +279,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Botón Principal
 if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
     with st.status("Procesando la información. Por favor espere...", expanded=True) as status:
         try:
