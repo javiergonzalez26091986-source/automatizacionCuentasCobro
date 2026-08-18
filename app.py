@@ -4,6 +4,7 @@ import requests
 import io
 import zipfile
 import os
+import re
 from datetime import datetime, timezone, timedelta
 from fpdf import FPDF
 import openpyxl
@@ -92,6 +93,11 @@ def limpiar_dinero(val):
     s = str(val).upper().replace('$', '').replace(',', '').replace('.', '').replace(' ', '')
     try: return float(s)
     except: return 0.0
+
+def limpiar_texto(txt):
+    """Elimina dobles espacios y normaliza el texto para evitar errores de digitación cruzando bases."""
+    if pd.isna(txt): return ""
+    return re.sub(r'\s+', ' ', str(txt).upper().strip())
 
 def obtener_horas(row):
     for col in ['HORAS', 'CANTIDAD DE HORAS', 'CANTIDAD HORAS', 'TOTAL HORAS', 'CANTIDAD']:
@@ -244,12 +250,10 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
 def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.add_page()
     
-    # Inserción del logo para el PDF del Documento Equivalente
     try:
         if os.path.exists('sergemLogo.png'):
             pdf.image('sergemLogo.png', 10, 8, w=45)
-    except:
-        pass
+    except: pass
 
     pdf.set_font('helvetica', 'B', 10)
     pdf.cell(0, 5, "DOCUMENTO EQUIVALENTE A LA FACTURA DE VENTA", 0, 1, 'R')
@@ -327,7 +331,7 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.cell(0, 6, nombres_conds, 1, 1)
     pdf.ln(6)
 
-    # Detalle de Items (Cantidad = Horas)
+    # Detalle de Items
     pdf.set_fill_color(227, 0, 15)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font('helvetica', 'B', 9)
@@ -405,15 +409,13 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     center_align = Alignment(horizontal="center", vertical="center")
     right_align = Alignment(horizontal="right", vertical="center")
 
-    # Inserción del logo para el Excel del Documento Equivalente
     try:
         if os.path.exists('sergemLogo.png'):
             img = XLImage('sergemLogo.png')
             img.width = 150
             img.height = 60
             ws.add_image(img, 'B2')
-    except: 
-        pass
+    except: pass
 
     ws.merge_cells('D2:H4')
     ws['D2'] = "DOCUMENTO EQUIVALENTE A LA FACTURA DE VENTA\n(DECRETO 522 DE 2003)\nDOCUMENTO SOPORTE EN ADQUISICIONES A NO OBLIGADOS A FACTURAR"
@@ -509,6 +511,14 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
 # ==============================================================================
 # PROCESO MATEMÁTICO PRINCIPAL (AGRUPADO POR TITULAR)
 # ==============================================================================
+def obtener_nombre_columna(df, opciones):
+    """Busca dinámicamente si existe alguna columna de la lista de opciones."""
+    for op in opciones:
+        for col in df.columns:
+            if limpiar_texto(col) == limpiar_texto(op):
+                return col
+    return None
+
 def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
     conductores = []
     suma_neto = 0
@@ -526,19 +536,34 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
     num_cuenta = str(row_titular.get('NO. CUENTA', '')).strip()
     ciudad_titular = str(row_titular.get('CIUDAD', '')).upper().strip()
 
+    # Ubicamos dinámicamente las columnas en df_fuera para evitar errores de tipeo o nombres en el Excel
+    col_f_corte = None
+    col_f_cond = None
+    col_f_total = None
+    
+    if not df_fuera.empty:
+        col_f_corte = obtener_nombre_columna(df_fuera, ['CORTE', 'PERIODO', 'FECHAS'])
+        col_f_cond = obtener_nombre_columna(df_fuera, ['CONDUCTOR', 'NOMBRE', 'NOMBRES', 'NOMBRE CONDUCTOR'])
+        col_f_total = obtener_nombre_columna(df_fuera, ['TOTAL', 'VALOR', 'TOTAL A PAGAR', 'NETO A PAGAR', 'VALOR TOTAL'])
+
     for _, row in grupo_df.iterrows():
         ingreso_neto_esperado = limpiar_dinero(row.get('TOTAL A PAGAR', 0))
         if ingreso_neto_esperado <= 0: continue
 
-        nombre_conductor = str(row.get('CONDUCTOR', '')).upper().strip()
+        nombre_conductor = str(row.get('CONDUCTOR', '')).strip()
         ciudad = str(row.get('CIUDAD', '')).upper().strip()
         cedula_conductor = str(row.get('CEDULA', '')).strip()
         horas = obtener_horas(row)
 
         fuera_perimetro_neto = 0.0
-        if not df_fuera.empty and 'TOTAL' in df_fuera.columns and 'CONDUCTOR' in df_fuera.columns:
-            match = df_fuera[(df_fuera['CORTE'].astype(str).str.strip() == corte_seleccionado) & (df_fuera['CONDUCTOR'].astype(str).str.upper().str.strip() == nombre_conductor)]
-            fuera_perimetro_neto = sum(match['TOTAL'].apply(limpiar_dinero))
+        
+        # Búsqueda rigurosa y a prueba de errores de la salida fuera de perímetro
+        if col_f_corte and col_f_cond and col_f_total:
+            match = df_fuera[
+                (df_fuera[col_f_corte].apply(limpiar_texto) == limpiar_texto(corte_seleccionado)) & 
+                (df_fuera[col_f_cond].apply(limpiar_texto) == limpiar_texto(nombre_conductor))
+            ]
+            fuera_perimetro_neto = sum(match[col_f_total].apply(limpiar_dinero))
 
         total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
 
@@ -555,7 +580,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
         neto_a_pagar = ingreso_bruto_total - retefuente - ica
 
         conductores.append({
-            'nombre_conductor': nombre_conductor,
+            'nombre_conductor': nombre_conductor.upper(),
             'cedula_conductor': cedula_conductor,
             'horas': horas,
             'ingreso_base': ingreso_base_bruta,
@@ -592,23 +617,19 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
         'total_horas': suma_horas
     }
 
-def obtener_nombre_columna(df, opciones):
-    for op in opciones:
-        if op in df.columns: return op
-    return None
-
 # ==============================================================================
 # INTERFAZ DE USUARIO
 # ==============================================================================
-col1, col2 = st.columns([1.5, 3.5])
+col1, col2 = st.columns([1, 4])
 with col1:
-    # Mostramos el logo de forma directa y explícita en la web
     try:
-        st.image("sergemLogo.png", width=200)
+        if os.path.exists("sergemLogo.png"):
+            st.image("sergemLogo.png", use_column_width=True)
+        elif os.path.exists("sergemLogo_2.png"):
+            st.image("sergemLogo_2.png", use_column_width=True)
     except:
         pass
 with col2:
-    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
     st.title("Generador Automático de Documentos")
     st.markdown("**SERGEM Mensajería S.A.S.**")
 
@@ -665,13 +686,16 @@ if "Individual" in modo_trabajo:
         if not calculos:
             st.warning("Este titular tiene saldo neto en $0 para este corte.")
         else:
-            st.markdown(f"### Resumen Financiero: {calculos['nombre_titular']} (Conductores: {len(calculos['conductores'])})")
+            st.markdown(f"### Resumen Financiero: {calculos['nombre_titular']} (Conductores unificados: {len(calculos['conductores'])})")
             cA, cB, cC, cD = st.columns(4)
             cA.markdown(f"<div class='metric-box'><b>BASE BRUTA</b><br>${calculos['ingreso_base']:,.0f}</div>", unsafe_allow_html=True)
             cB.markdown(f"<div class='metric-box'><b>RETEFUENTE (1%)</b><br>${calculos['retefuente']:,.0f}</div>", unsafe_allow_html=True)
             cC.markdown(f"<div class='metric-box'><b>RETEICA</b><br>${calculos['ica']:,.0f}</div>", unsafe_allow_html=True)
             cD.markdown(f"<div class='metric-box' style='background-color:#E3000F; color:white;'><b>NETO EXACTO</b><br>${calculos['neto_pagar']:,.0f}</div>", unsafe_allow_html=True)
             
+            if calculos['fuera_perimetro'] > 0:
+                st.success(f"🚚 **¡Valor detectado!** Se sumaron **${calculos['fuera_perimetro']:,.0f}** adicionales correspondientes a Salidas Fuera de Perímetro.")
+
             datos_doc = calculos.copy()
             datos_doc.update({'id': "PREVIEW", 'fecha_emision': obtener_fecha_actual(), 'corte_fechas': corte_seleccionado})
             
