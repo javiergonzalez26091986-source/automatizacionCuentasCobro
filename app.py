@@ -470,7 +470,7 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                 contador += 1
             
             df_resultado = pd.DataFrame(pagos_procesados)
-            zip_file.writestr("Archivo_Plano_Bancario_Don_Jose.csv", df_resultado.to_csv(index=False, sep=';', encoding='utf-8-sig'))
+            zip_file.writestr("Archivo_Plano_Bancario.csv", df_resultado.to_csv(index=False, sep=';', encoding='utf-8-sig'))
         
         zip_buffer.seek(0)
         
