@@ -101,18 +101,16 @@ def limpiar_dinero(val):
     except: return 0.0
 
 # ==============================================================================
-# LÓGICA DE PDFS (Ajustada a instrucciones de los audios)
+# LÓGICA DE PDFS 
 # ==============================================================================
 def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.add_page()
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("helvetica", "", 11)
     
-    # Fecha arriba a la izquierda
     pdf.cell(0, 6, f"{datos['ciudad']} {datos['fecha_emision']}".upper(), 0, 1)
     pdf.ln(12)
     
-    # Encabezado centrado sin logo (Debe a Sergem)
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 6, "SERGEM MENSAJERIA S.A.S.", 0, 1, 'C')
     pdf.set_font("helvetica", "", 11)
@@ -211,7 +209,6 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.cell(0, 5, datos['fecha_emision'], 0, 1)
     pdf.ln(3)
 
-    # Info Empresa
     pdf.set_fill_color(51, 51, 51)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font('helvetica', 'B', 9)
@@ -241,7 +238,6 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.cell(0, 6, "CALI", 1, 1)
     pdf.ln(4)
 
-    # Info Proveedor
     pdf.set_fill_color(51, 51, 51)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font('helvetica', 'B', 9)
@@ -267,7 +263,6 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.cell(0, 6, datos['nombre_conductor'][:20], 1, 1)
     pdf.ln(6)
 
-    # Tabla 
     pdf.set_fill_color(227, 0, 15)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font('helvetica', 'B', 9)
@@ -293,7 +288,6 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
         pdf.cell(0, 6, f"$ {datos['fuera_perimetro']:,.0f}", 1, 1, 'R')
 
     pdf.ln(2)
-    # Totales
     pdf.set_font('helvetica', 'B', 9)
     pdf.cell(120, 6, "", 0, 0)
     pdf.cell(35, 6, "SUBTOTAL:", 1, 0, 'R')
@@ -333,7 +327,6 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.cell(80, 5, f"NOMBRE: {datos['nombre_titular']}", 0, 1)
 
 def construir_hoja_documento_equivalente_excel(ws, datos):
-    # La misma lógica estructural de tu Excel previo con la corrección de márgenes y tamaños
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="E3000F", end_color="E3000F", fill_type="solid")
     dark_fill = PatternFill(start_color="333333", end_color="333333", fill_type="solid")
@@ -425,7 +418,7 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws.page_margins.left = 0.5; ws.page_margins.right = 0.5; ws.page_margins.top = 0.5; ws.page_margins.bottom = 0.5
 
 # ==============================================================================
-# PROCESO MATEMÁTICO PRINCIPAL (Conductor individual)
+# PROCESO MATEMÁTICO PRINCIPAL 
 # ==============================================================================
 def calcular_valores_conductor(row, df_fuera, corte_seleccionado):
     ingreso_neto_esperado = limpiar_dinero(row.get('TOTAL A PAGAR', 0))
@@ -434,18 +427,13 @@ def calcular_valores_conductor(row, df_fuera, corte_seleccionado):
     nombre_conductor = str(row.get('CONDUCTOR', '')).upper().strip()
     ciudad = str(row.get('CIUDAD', '')).upper().strip()
     
-    # Filtro estricto para evitar duplicidades (Corrección caso Milton)
     fuera_perimetro_neto = 0.0
     if not df_fuera.empty and 'TOTAL' in df_fuera.columns and 'CONDUCTOR' in df_fuera.columns:
-        match = df_fuera[
-            (df_fuera['CORTE'].astype(str).str.strip() == corte_seleccionado) & 
-            (df_fuera['CONDUCTOR'].astype(str).str.upper().str.strip() == nombre_conductor)
-        ]
+        match = df_fuera[(df_fuera['CORTE'].astype(str).str.strip() == corte_seleccionado) & (df_fuera['CONDUCTOR'].astype(str).str.upper().str.strip() == nombre_conductor)]
         fuera_perimetro_neto = sum(match['TOTAL'].apply(limpiar_dinero))
     
     total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
     
-    # --- CÁLCULO GROSS-UP PARA PROTEGER EL NETO ---
     porcentaje_retefuente = 0.01
     porcentaje_ica = 0.01 if ciudad == 'CALI' else 0.0
     tasa_total_impuestos = porcentaje_retefuente + porcentaje_ica
@@ -454,10 +442,7 @@ def calcular_valores_conductor(row, df_fuera, corte_seleccionado):
     retefuente = round(ingreso_bruto_total * porcentaje_retefuente)
     ica = round(ingreso_bruto_total * porcentaje_ica)
     
-    if fuera_perimetro_neto > 0:
-        fuera_perimetro_bruto = round(fuera_perimetro_neto / (1 - tasa_total_impuestos))
-    else:
-        fuera_perimetro_bruto = 0.0
+    fuera_perimetro_bruto = round(fuera_perimetro_neto / (1 - tasa_total_impuestos)) if fuera_perimetro_neto > 0 else 0.0
         
     ingreso_base_bruta = ingreso_bruto_total - fuera_perimetro_bruto
     neto_a_pagar = ingreso_bruto_total - retefuente - ica
@@ -543,16 +528,22 @@ if "Individual" in modo_trabajo:
             
             st.info("💡 El sistema ha inflado la base bruta automáticamente para que al descontar los impuestos, el resultado sea exactamente el que usted parametrizó en el Excel de origen.")
             
-            # Preparar un mini-diccionario de datos para generar PDFs al vuelo
             datos_doc = calculos.copy()
             datos_doc.update({'id': "PREVIEW", 'fecha_emision': obtener_fecha_actual(), 'corte_fechas': corte_seleccionado})
             
             pdf_ct = FPDF(); agregar_pagina_pdf_cuenta_cobro(pdf_ct, datos_doc)
             pdf_eq = FPDF(); agregar_pagina_pdf_doc_equivalente(pdf_eq, datos_doc)
             
+            # --- CORRECCIÓN BINARIA APLICADA AQUÍ ---
+            out_ct = pdf_ct.output()
+            pdf_ct_bytes = out_ct.encode('latin-1') if isinstance(out_ct, str) else bytes(out_ct)
+            
+            out_eq = pdf_eq.output()
+            pdf_eq_bytes = out_eq.encode('latin-1') if isinstance(out_eq, str) else bytes(out_eq)
+            
             colBtn1, colBtn2 = st.columns(2)
-            colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=pdf_ct.output(), file_name=f"Cuenta_{cond_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
-            colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq.output(), file_name=f"DocEq_{cond_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
+            colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=pdf_ct_bytes, file_name=f"Cuenta_{cond_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
+            colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq_bytes, file_name=f"DocEq_{cond_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
 
 # ==============================================================================
 # MODO MASIVO (LOTE)
@@ -567,7 +558,6 @@ else:
             zip_buffer = io.BytesIO()
             fecha_actual = obtener_fecha_actual() 
             
-            # Archivos Maestros para Súper Impresión
             pdf_maestro_cuentas = FPDF()
             pdf_maestro_equivalentes = FPDF()
             wb_maestro_equivalentes = openpyxl.Workbook()
@@ -586,16 +576,13 @@ else:
                     datos_doc = calculos.copy()
                     datos_doc.update({'id': str(contador).zfill(3), 'fecha_emision': fecha_actual, 'corte_fechas': corte_seleccionado})
 
-                    # Alimentar Super PDFs
                     agregar_pagina_pdf_cuenta_cobro(pdf_maestro_cuentas, datos_doc)
                     agregar_pagina_pdf_doc_equivalente(pdf_maestro_equivalentes, datos_doc)
 
-                    # Alimentar Super Excel (Pestañas)
                     nombre_pestana = f"{contador}_{datos_doc['nombre_titular'][:20]}".replace(":", "").replace("/", "-")
                     ws_nuevo = wb_maestro_equivalentes.create_sheet(title=nombre_pestana)
                     construir_hoja_documento_equivalente_excel(ws_nuevo, datos_doc)
 
-                    # Alimentar Archivo Plano del Banco
                     pagos_procesados_banco.append({
                         'NIT_BENEFICIARIO': datos_doc['cedula_titular'],
                         'NOMBRE_BENEFICIARIO': datos_doc['nombre_titular'],
@@ -608,16 +595,20 @@ else:
                     })
                     contador += 1
                 
-                # Empaquetar Super Archivos
-                zip_file.writestr("1_SUPER_IMPRESION_Cuentas_de_Cobro.pdf", pdf_maestro_cuentas.output())
-                zip_file.writestr("2_SUPER_IMPRESION_Documentos_Equivalentes.pdf", pdf_maestro_equivalentes.output())
+                # --- CORRECCIÓN BINARIA APLICADA AQUÍ ---
+                out_maestro_cuentas = pdf_maestro_cuentas.output()
+                pdf_maestro_ct_bytes = out_maestro_cuentas.encode('latin-1') if isinstance(out_maestro_cuentas, str) else bytes(out_maestro_cuentas)
+                zip_file.writestr("1_SUPER_IMPRESION_Cuentas_de_Cobro.pdf", pdf_maestro_ct_bytes)
+                
+                out_maestro_eq = pdf_maestro_equivalentes.output()
+                pdf_maestro_eq_bytes = out_maestro_eq.encode('latin-1') if isinstance(out_maestro_eq, str) else bytes(out_maestro_eq)
+                zip_file.writestr("2_SUPER_IMPRESION_Documentos_Equivalentes.pdf", pdf_maestro_eq_bytes)
                 
                 excel_maestro_io = io.BytesIO()
                 wb_maestro_equivalentes.save(excel_maestro_io)
                 excel_maestro_io.seek(0)
                 zip_file.writestr("3_ARCHIVO_Documentos_Equivalentes_Pestañas.xlsx", excel_maestro_io.read())
                 
-                # Crear y empaquetar Formato Banco
                 df_banco = pd.DataFrame(pagos_procesados_banco)
                 excel_banco_io = io.BytesIO()
                 df_banco.to_excel(excel_banco_io, index=False, sheet_name="PLANO_BANCO")
