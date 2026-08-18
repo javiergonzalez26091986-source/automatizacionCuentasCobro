@@ -4,7 +4,7 @@ import requests
 import io
 import zipfile
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from fpdf import FPDF
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -86,7 +86,9 @@ GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp
 # --- OBTENER FECHA ACTUAL EN FORMATO COLOMBIANO ---
 def obtener_fecha_actual():
     meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
-    hoy = datetime.now()
+    # Configuración de zona horaria para Colombia (UTC -5)
+    zona_colombia = timezone(timedelta(hours=-5))
+    hoy = datetime.now(zona_colombia)
     return f"{hoy.day} DE {meses[hoy.month - 1]} DE {hoy.year}"
 
 # --- FUNCIÓN PARA CARGAR DATOS CON CACHÉ ---
@@ -206,7 +208,10 @@ def generar_excel_documento_equivalente(datos):
     ws['D2'].font = Font(bold=True, size=11, color="1E293B")
     ws['D2'].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    hoy = datetime.now()
+    # Configuración de zona horaria para Colombia (UTC -5)
+    zona_colombia = timezone(timedelta(hours=-5))
+    hoy = datetime.now(zona_colombia)
+    
     ws['B6'] = "Fecha de Expedición:"
     ws['B6'].font = bold_font
     ws['C6'] = "Año:"
@@ -414,7 +419,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# BOTÓN PARA FORZAR LA SINCRONIZACIÓN (Aquí estaba el error de kind/type)
 if st.button("🔄 Sincronizar Base de Datos", key="btn_sync", type="secondary"):
     st.cache_data.clear()
     st.rerun()
@@ -450,7 +454,7 @@ else:
     st.error("No se encontró la columna 'CORTE' en la hoja de Google Sheets.")
     st.stop()
 
-# 3. BOTÓN DE PROCESAMIENTO (También actualizado kind a type)
+# 3. BOTÓN DE PROCESAMIENTO
 if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True, type="primary"):
     
     mensaje_carga = st.info(f"📥 Procesando la información para el corte: {corte_seleccionado}...")
