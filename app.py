@@ -48,7 +48,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- URL INTEGRADA (Oculta al usuario) ---
-# Se extrae de los mensajes anteriores la URL proporcionada por el usuario
 GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp40hdIzJeEm4dKNLBgDVxwEY95T0EIoBu_qo8FB/exec"
 
 # --- FUNCIONES DE GENERACIÓN ---
@@ -335,7 +334,6 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
             
             st.success(f"✅ ¡Todo listo! Se procesaron {len(df_resultado)} pagos.")
             
-            # Botón de descarga destacado
             st.download_button(
                 label="📥 DESCARGAR ARCHIVOS DE LA QUINCENA (.ZIP)",
                 data=zip_buffer,
