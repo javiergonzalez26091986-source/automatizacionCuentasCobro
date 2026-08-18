@@ -56,7 +56,7 @@ def obtener_fecha_actual():
     hoy = datetime.now()
     return f"{hoy.day} DE {meses[hoy.month - 1]} DE {hoy.year}"
 
-# --- CLASE PARA PDF CON EL FORMATO DE LA CLIENTA ---
+# --- CLASE PARA PDF ---
 class PDFCuentaCobro(FPDF):
     def header(self):
         try:
@@ -78,7 +78,6 @@ def generar_pdf_cuenta_cobro(datos):
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("helvetica", "B", 11)
     
-    # Fecha de emisión dinámica
     pdf.cell(0, 6, f"{datos['ciudad']} {datos['fecha_emision']}".upper(), 0, 1)
     pdf.ln(8)
     
@@ -91,7 +90,6 @@ def generar_pdf_cuenta_cobro(datos):
     pdf.cell(0, 6, f"C.C {datos['cedula_titular']}", 0, 1)
     pdf.ln(5)
 
-    # Detalle de pago (Se amplió el ancho a 80 para evitar superposición)
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(80, 6, "VALOR BASE:", 0, 0)
     pdf.set_font("helvetica", "", 11)
@@ -143,6 +141,7 @@ def generar_excel_documento_equivalente(datos):
     # Estilos profesionales
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="E3000F", end_color="E3000F", fill_type="solid")
+    dark_fill = PatternFill(start_color="333333", end_color="333333", fill_type="solid")
     bold_font = Font(bold=True)
     border_thin = Border(left=Side(style='thin', color='BFBFBF'), 
                          right=Side(style='thin', color='BFBFBF'), 
@@ -161,123 +160,195 @@ def generar_excel_documento_equivalente(datos):
     except:
         pass
 
-    ws.merge_cells('D2:I3')
-    ws['D2'] = "DOCUMENTO SOPORTE EN ADQUISICIONES\nEFECTUADAS A NO OBLIGADOS A FACTURAR"
-    ws['D2'].font = Font(bold=True, size=13, color="1E293B")
+    # Título Principal adaptado al formato original
+    ws.merge_cells('D2:H4')
+    ws['D2'] = "DOCUMENTO EQUIVALENTE A LA FACTURA DE VENTA\n(DECRETO 522 DE 2003)\nDOCUMENTO SOPORTE EN ADQUISICIONES A NO OBLIGADOS A FACTURAR"
+    ws['D2'].font = Font(bold=True, size=11, color="1E293B")
     ws['D2'].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # Info de la empresa (Caja superior)
-    ws['B5'] = "Empresa:"
-    ws['C5'] = "SERGEM MENSAJERIA S.A.S."
-    ws['C5'].font = bold_font
-    ws['B6'] = "NIT:"
-    ws['C6'] = "900.561.833-1"
+    # FECHAS Y CONSECUTIVO
+    hoy = datetime.now()
+    
+    ws['B6'] = "Fecha de Expedición:"
+    ws['B6'].font = bold_font
+    ws['C6'] = "Año:"
+    ws['D6'] = hoy.year
+    ws['E6'] = "Mes:"
+    ws['F6'] = f"{hoy.month:02d}"
+    ws['G6'] = "Día:"
+    ws['H6'] = f"{hoy.day:02d}"
+    
+    ws['B7'] = "Fecha de Radicación:"
+    ws['B7'].font = bold_font
+    ws['C7'] = "Año:"
+    ws['D7'] = hoy.year
+    ws['E7'] = "Mes:"
+    ws['F7'] = f"{hoy.month:02d}"
+    ws['G7'] = "Día:"
+    ws['H7'] = f"{hoy.day:02d}"
 
-    ws['G5'] = "Documento No:"
+    ws['G5'] = "CONSECUTIVO NO:"
+    ws['G5'].font = Font(bold=True, size=11, color="E3000F")
+    ws['G5'].alignment = right_align
     ws['H5'] = datos['id']
     ws['H5'].font = Font(bold=True, size=12, color="E3000F")
-    ws['H5'].alignment = right_align
-    ws['G6'] = "Fecha Emisión:"
-    ws['H6'] = datos['fecha_emision']
-    ws['H6'].alignment = right_align
+    ws['H5'].alignment = center_align
 
-    # Info del Proveedor (Caja central con bordes)
-    ws['B8'] = " DATOS DEL BENEFICIARIO / PROVEEDOR"
-    ws['B8'].font = Font(bold=True, color="FFFFFF")
-    ws['B8'].fill = PatternFill(start_color="333333", end_color="333333", fill_type="solid")
-    ws.merge_cells('B8:H8')
+    # INFORMACIÓN COMPRADOR (EMPRESA)
+    ws['B9'] = " INFORMACIÓN DE LA EMPRESA (COMPRADOR)"
+    ws['B9'].font = header_font
+    ws['B9'].fill = dark_fill
+    ws.merge_cells('B9:H9')
 
-    ws['B9'] = "Nombre:"
-    ws['B9'].font = bold_font
-    ws['C9'] = datos['nombre_titular']
-    ws.merge_cells('C9:E9')
-    ws['G9'] = "C.C / NIT:"
-    ws['G9'].font = bold_font
-    ws['H9'] = datos['cedula_titular']
-
-    ws['B10'] = "Ciudad:"
+    ws['B10'] = "Razón Social:"
     ws['B10'].font = bold_font
-    ws['C10'] = datos['ciudad']
+    ws['C10'] = "SERGEM MENSAJERIA S.A.S."
     ws.merge_cells('C10:E10')
-    ws['G10'] = "Conductor:"
+    ws['G10'] = "NIT:"
     ws['G10'].font = bold_font
-    ws['H10'] = datos['nombre_conductor']
+    ws['H10'] = "900.561.833-1"
 
-    # Aplicar bordes suaves a la caja del proveedor
-    for r in range(9, 11):
+    ws['B11'] = "Dirección:"
+    ws['B11'].font = bold_font
+    ws['C11'] = "CRA 62 9 235"
+    ws.merge_cells('C11:D11')
+    ws['E11'] = "Teléfono:"
+    ws['E11'].font = bold_font
+    ws['F11'] = "3994620"
+    ws['G11'] = "Ciudad:"
+    ws['G11'].font = bold_font
+    ws['H11'] = "CALI"
+
+    # INFORMACIÓN VENDEDOR (PROVEEDOR)
+    ws['B13'] = " DATOS DEL BENEFICIARIO / PROVEEDOR (VENDEDOR)"
+    ws['B13'].font = header_font
+    ws['B13'].fill = dark_fill
+    ws.merge_cells('B13:H13')
+
+    ws['B14'] = "Nombre:"
+    ws['B14'].font = bold_font
+    ws['C14'] = datos['nombre_titular']
+    ws.merge_cells('C14:E14')
+    ws['G14'] = "C.C / NIT:"
+    ws['G14'].font = bold_font
+    ws['H14'] = datos['cedula_titular']
+
+    ws['B15'] = "Dirección:"
+    ws['B15'].font = bold_font
+    ws['C15'] = "" # En blanco para diligenciar
+    ws.merge_cells('C15:D15')
+    ws['E15'] = "Teléfono:"
+    ws['E15'].font = bold_font
+    ws['F15'] = "" # En blanco
+    ws['G15'] = "Ciudad:"
+    ws['G15'].font = bold_font
+    ws['H15'] = datos['ciudad']
+
+    ws['B16'] = "Email:"
+    ws['B16'].font = bold_font
+    ws.merge_cells('C16:E16')
+    ws['G16'] = "Conductor:"
+    ws['G16'].font = bold_font
+    ws['H16'] = datos['nombre_conductor']
+
+    # Aplicar bordes a las cajas informativas
+    for r in range(10, 12):
+        for c in ['B', 'C', 'D', 'E', 'F', 'G', 'H']:
+            ws[f'{c}{r}'].border = border_thin
+    for r in range(14, 17):
         for c in ['B', 'C', 'D', 'E', 'F', 'G', 'H']:
             ws[f'{c}{r}'].border = border_thin
 
-    # Tabla de Conceptos
+    # TABLA DE CONCEPTOS
+    fila = 18
     for i, h in enumerate(["Ítem", "Concepto", "Cantidad", "V. Unitario", "V. Total"]):
-        c = ['B', 'C', 'F', 'G', 'H'][i] + '12'
+        c = ['B', 'C', 'F', 'G', 'H'][i] + str(fila)
         ws[c] = h
         ws[c].font = header_font
         ws[c].fill = header_fill
         ws[c].alignment = center_align
         ws[c].border = border_thin
-    ws.merge_cells('C12:E12')
-
-    ws['B13'] = 1
-    ws['C13'] = f"Servicio mensajería ({datos['corte_fechas']})"
-    ws.merge_cells('C13:E13')
-    ws['F13'] = 1
-    ws['G13'] = datos['ingreso_base']
-    ws['H13'] = datos['ingreso_base']
-
-    fila_subtotal = 15
-    if datos.get('fuera_perimetro', 0) > 0:
-        ws['B14'] = 2
-        ws['C14'] = "Servicios Fuera de Perímetro"
-        ws.merge_cells('C14:E14')
-        ws['F14'] = 1
-        ws['G14'] = datos['fuera_perimetro']
-        ws['H14'] = datos['fuera_perimetro']
-        for c in ['B14', 'C14', 'D14', 'E14', 'F14', 'G14', 'H14']:
-            ws[c].border = border_thin
-        ws['G14'].number_format = '"$"#,##0'
-        ws['H14'].number_format = '"$"#,##0'
-        ws['B14'].alignment = center_align
-        ws['F14'].alignment = center_align
-        ws['C14'].alignment = left_align
-        fila_subtotal = 16
+    ws.merge_cells(f'C{fila}:E{fila}')
     
-    for c in ['B13', 'C13', 'D13', 'E13', 'F13', 'G13', 'H13']:
-        ws[c].border = border_thin
-    ws['G13'].number_format = '"$"#,##0'
-    ws['H13'].number_format = '"$"#,##0'
-    ws['B13'].alignment = center_align
-    ws['F13'].alignment = center_align
-    ws['C13'].alignment = left_align
+    fila += 1
+    ws[f'B{fila}'] = 1
+    ws[f'C{fila}'] = f"Servicio de mensajería - Corte: {datos['corte_fechas']}"
+    ws.merge_cells(f'C{fila}:E{fila}')
+    ws[f'F{fila}'] = 1
+    ws[f'G{fila}'] = datos['ingreso_base']
+    ws[f'H{fila}'] = datos['ingreso_base']
+    
+    for c in ['B', 'C', 'D', 'E', 'F', 'G', 'H']:
+        ws[f'{c}{fila}'].border = border_thin
+    ws[f'B{fila}'].alignment = center_align
+    ws[f'C{fila}'].alignment = left_align
+    ws[f'F{fila}'].alignment = center_align
+    ws[f'G{fila}'].number_format = '"$"#,##0'
+    ws[f'H{fila}'].number_format = '"$"#,##0'
 
-    # Totales (Más organizados)
-    ws[f'G{fila_subtotal}'] = "SUBTOTAL:"
-    ws[f'H{fila_subtotal}'] = datos['ingreso_bruto_total']
-    ws[f'G{fila_subtotal+1}'] = "Retefuente (1%):"
-    ws[f'H{fila_subtotal+1}'] = -datos['retefuente']
-    ws[f'G{fila_subtotal+2}'] = "ICA (1%):"
-    ws[f'H{fila_subtotal+2}'] = -datos['ica']
-    ws[f'G{fila_subtotal+3}'] = "TOTAL A PAGAR:"
-    ws[f'H{fila_subtotal+3}'] = datos['neto_pagar']
-
-    for r in range(fila_subtotal, fila_subtotal+4):
-        ws[f'G{r}'].font = bold_font
-        ws[f'G{r}'].alignment = right_align
-        ws[f'H{r}'].number_format = '"$"#,##0'
-        ws[f'G{r}'].border = border_thin
-        ws[f'H{r}'].border = border_thin
+    if datos.get('fuera_perimetro', 0) > 0:
+        fila += 1
+        ws[f'B{fila}'] = 2
+        ws[f'C{fila}'] = "Servicios Fuera de Perímetro"
+        ws.merge_cells(f'C{fila}:E{fila}')
+        ws[f'F{fila}'] = 1
+        ws[f'G{fila}'] = datos['fuera_perimetro']
+        ws[f'H{fila}'] = datos['fuera_perimetro']
         
-    ws[f'G{fila_subtotal+3}'].font = Font(bold=True, color="E3000F")
-    ws[f'H{fila_subtotal+3}'].font = Font(bold=True, size=12)
-    ws[f'H{fila_subtotal+3}'].fill = PatternFill(start_color="F4F6F9", end_color="F4F6F9", fill_type="solid")
+        for c in ['B', 'C', 'D', 'E', 'F', 'G', 'H']:
+            ws[f'{c}{fila}'].border = border_thin
+        ws[f'B{fila}'].alignment = center_align
+        ws[f'C{fila}'].alignment = left_align
+        ws[f'F{fila}'].alignment = center_align
+        ws[f'G{fila}'].number_format = '"$"#,##0'
+        ws[f'H{fila}'].number_format = '"$"#,##0'
+        
+    # TOTALES Y CONTABILIZACIÓN
+    fila += 2
+    totales = [
+        ("SUBTOTAL:", datos['ingreso_bruto_total']),
+        ("IVA (19%):", ""), # Vacío como el original
+        ("RETEIVA:", ""), # Vacío como el original
+        ("RTE FTE (1%):", -datos['retefuente']),
+        ("RETEICA (1%):", -datos['ica']),
+        ("NETO A PAGAR:", datos['neto_pagar'])
+    ]
+    
+    fila_firma = fila + 1
 
-    # Anchos de columna optimizados
-    ws.column_dimensions['B'].width = 8
-    ws.column_dimensions['C'].width = 15
-    ws.column_dimensions['D'].width = 15
-    ws.column_dimensions['E'].width = 15
-    ws.column_dimensions['G'].width = 20
-    ws.column_dimensions['H'].width = 20
+    for label, valor in totales:
+        ws[f'G{fila}'] = label
+        ws[f'H{fila}'] = valor
+        ws[f'G{fila}'].font = bold_font
+        ws[f'G{fila}'].alignment = right_align
+        ws[f'G{fila}'].border = border_thin
+        ws[f'H{fila}'].border = border_thin
+        
+        if valor != "":
+            ws[f'H{fila}'].number_format = '"$"#,##0'
+        
+        if label == "NETO A PAGAR:":
+            ws[f'G{fila}'].font = Font(bold=True, color="E3000F")
+            ws[f'H{fila}'].font = Font(bold=True, size=12)
+            ws[f'H{fila}'].fill = PatternFill(start_color="F4F6F9", end_color="F4F6F9", fill_type="solid")
+            
+        fila += 1
+
+    # FIRMA Y DATOS FINALES
+    ws[f'B{fila_firma}'] = "________________________________________________"
+    ws[f'B{fila_firma+1}'] = "FIRMA PRESTADOR DEL SERVICIO"
+    ws[f'B{fila_firma+1}'].font = bold_font
+    ws[f'B{fila_firma+2}'] = f"C.C. / NIT: {datos['cedula_titular']}"
+    ws[f'B{fila_firma+3}'] = f"NOMBRE: {datos['nombre_titular']}"
+
+    # Ajuste de anchos de columna para mejor visualización
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 12
+    ws.column_dimensions['D'].width = 12
+    ws.column_dimensions['E'].width = 12
+    ws.column_dimensions['F'].width = 10
+    ws.column_dimensions['G'].width = 22
+    ws.column_dimensions['H'].width = 22
 
     excel_io = io.BytesIO()
     wb.save(excel_io)
@@ -313,8 +384,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
-    
-    # Eliminamos el st.status expandible y mostramos los mensajes en vivo en la pantalla principal
     mensaje_carga = st.info("📥 Conectando con Google Sheets y procesando la información. Por favor espere...")
     
     try:
@@ -335,7 +404,7 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
         pagos_procesados = []
         ignorados = 0
         zip_buffer = io.BytesIO()
-        fecha_actual = obtener_fecha_actual() # Se captura la fecha dinámicamente
+        fecha_actual = obtener_fecha_actual() 
         
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             contador = 1
@@ -378,7 +447,7 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                 
                 datos_doc = {
                     'id': str(contador).zfill(3),
-                    'fecha_emision': fecha_actual, # Usando la fecha de Colombia
+                    'fecha_emision': fecha_actual, 
                     'nombre_titular': nombre_titular,
                     'cedula_titular': cedula_titular,
                     'nombre_conductor': nombre_conductor,
@@ -405,7 +474,6 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
         
         zip_buffer.seek(0)
         
-        # Ocultamos el mensaje de carga y mostramos el éxito directamente
         mensaje_carga.empty() 
         st.success(f"✅ ¡Proceso finalizado con éxito! Se procesaron {len(df_resultado)} pagos. (Se omitieron {ignorados} registros con saldo $0).")
         
