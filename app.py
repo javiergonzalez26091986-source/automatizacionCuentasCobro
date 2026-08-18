@@ -49,7 +49,7 @@ st.markdown("""
 # --- URL INTEGRADA (Oculta al usuario) ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp40hdIzJeEm4dKNLBgDVxwEY95T0EIoBu_qo8FB/exec"
 
-# --- CLASE PARA PDF CON FPDF2 ---
+# --- CLASE PARA PDF CON EL NUEVO FORMATO DE LA CLIENTA ---
 class PDFCuentaCobro(FPDF):
     def header(self):
         try:
@@ -57,103 +57,89 @@ class PDFCuentaCobro(FPDF):
                 self.image('sergemLogo.png', 10, 8, 35)
         except:
             pass
-        self.set_font('helvetica', 'B', 14)
+        self.set_font('helvetica', 'B', 12)
         self.set_text_color(51, 51, 51)
-        self.cell(0, 8, 'SERGEM MENSAJERIA S.A.S.', 0, 1, 'R')
-        self.set_font('helvetica', '', 9)
-        self.set_text_color(119, 119, 119)
+        self.cell(0, 6, 'SERGEM MENSAJERIA S.A.S.', 0, 1, 'R')
+        self.set_font('helvetica', '', 10)
         self.cell(0, 5, 'NIT. 900.561.833-1', 0, 1, 'R')
-        self.ln(10)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_font('helvetica', 'I', 8)
-        self.set_text_color(150, 150, 150)
-        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
+        self.ln(15)
 
 def generar_pdf_cuenta_cobro(datos):
     pdf = PDFCuentaCobro()
     pdf.add_page()
     
-    # Título
-    pdf.set_font("helvetica", "B", 16)
-    pdf.set_text_color(227, 0, 15)
-    pdf.cell(0, 8, "CUENTA DE COBRO", 0, 1, "C")
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("helvetica", "B", 11)
     
-    pdf.set_font("helvetica", "", 10)
-    pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 6, f"Documento No. {datos['id']} | Fecha: {datos['fecha_actual']}", 0, 1, "C")
+    # Fecha y Ciudad (Ej: JAMUNDI 16 JULIO DEL 2026)
+    pdf.cell(0, 6, f"{datos['ciudad']} {datos['fecha_actual']}".upper(), 0, 1)
     pdf.ln(8)
     
     # Debe a
-    pdf.set_text_color(51, 51, 51)
-    pdf.set_font("helvetica", "B", 10)
-    pdf.cell(0, 5, "DEBE A:", 0, 1)
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, "Debe a:", 0, 1)
     
-    pdf.set_font("helvetica", "B", 13)
+    pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 6, datos['nombre_titular'], 0, 1)
-    pdf.set_font("helvetica", "", 10)
-    pdf.cell(0, 6, f"C.C. {datos['cedula_titular']}", 0, 1)
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, f"C.C {datos['cedula_titular']}", 0, 1)
     pdf.ln(5)
-    
-    # Caja de detalles
-    start_y = pdf.get_y()
-    pdf.set_fill_color(253, 251, 247)
-    pdf.set_draw_color(221, 221, 221)
-    pdf.rect(10, start_y, 190, 75, style='FD')
-    
-    pdf.set_xy(15, start_y + 5)
-    pdf.set_font("helvetica", "", 10)
-    pdf.cell(0, 6, f"Concepto: Servicio de mensajería prestado en el corte del {datos['corte_fechas']}.", 0, 1)
-    pdf.set_x(15)
-    pdf.cell(0, 6, f"Conductor: {datos['nombre_conductor']} (C.C. {datos['cedula_conductor']})", 0, 1)
-    pdf.set_x(15)
-    pdf.cell(0, 6, f"Ciudad de Operación: {datos['ciudad']}", 0, 1)
-    pdf.ln(4)
-    
-    pdf.set_x(15)
-    pdf.cell(90, 6, "Valor Base Negociado:", 0, 0)
-    pdf.cell(85, 6, f"$ {datos['ingreso_bruto']:,.0f}", 0, 1, "R")
-    
-    pdf.set_x(15)
-    pdf.set_text_color(217, 83, 79)
-    pdf.cell(90, 6, "Retención en la Fuente (1%):", 0, 0)
-    pdf.cell(85, 6, f"- $ {datos['retefuente']:,.0f}", 0, 1, "R")
-    
-    pdf.set_x(15)
-    pdf.cell(90, 6, "Descuento ICA (1%):", 0, 0)
-    pdf.cell(85, 6, f"- $ {datos['ica']:,.0f}", 0, 1, "R")
-    
-    pdf.set_text_color(51, 51, 51)
-    pdf.set_x(15)
+
+    # Detalle de pago
     pdf.set_font("helvetica", "B", 11)
-    pdf.set_text_color(227, 0, 15)
-    pdf.cell(90, 8, "NETO A PAGAR:", "T", 0)
-    pdf.cell(85, 8, f"$ {datos['neto_pagar']:,.0f}", "T", 1, "R")
+    pdf.cell(60, 6, "VALOR BASE:", 0, 0)
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, f"$ {datos['ingreso_base']:,.0f}", 0, 1)
+
+    if datos.get('fuera_perimetro', 0) > 0:
+        pdf.set_font("helvetica", "B", 11)
+        pdf.cell(60, 6, "FUERA DE PERÍMETRO:", 0, 0)
+        pdf.set_font("helvetica", "", 11)
+        pdf.cell(0, 6, f"$ {datos['fuera_perimetro']:,.0f}", 0, 1)
+
+    pdf.set_font("helvetica", "B", 11)
+    pdf.cell(60, 6, "RETEFUENTE (1%):", 0, 0)
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, f"- $ {datos['retefuente']:,.0f}", 0, 1)
+
+    if datos['ica'] > 0:
+        pdf.set_font("helvetica", "B", 11)
+        pdf.cell(60, 6, "ICA (1%):", 0, 0)
+        pdf.set_font("helvetica", "", 11)
+        pdf.cell(0, 6, f"- $ {datos['ica']:,.0f}", 0, 1)
+
+    pdf.set_font("helvetica", "B", 12)
+    pdf.cell(60, 8, "VALOR TOTAL A PAGAR:", 0, 0)
+    pdf.cell(0, 8, f"$ {datos['neto_pagar']:,.0f}", 0, 1)
+    pdf.ln(8)
     
-    # Info Bancaria
-    pdf.set_xy(10, start_y + 80)
-    pdf.set_text_color(51, 51, 51)
-    pdf.set_fill_color(244, 244, 244)
-    pdf.rect(10, pdf.get_y(), 190, 32, style='FD')
+    # Concepto
+    pdf.set_font("helvetica", "B", 11)
+    pdf.cell(25, 6, "CONCEPTO:", 0, 0)
+    pdf.set_font("helvetica", "", 11)
+    concepto = f"SERVICIO PRESTADO EN EL CORTE DEL {datos['corte_fechas']}, POR EL CONDUCTOR {datos['nombre_conductor']} CÉDULA {datos['cedula_conductor']}."
+    pdf.multi_cell(0, 6, concepto)
+    pdf.ln(10)
     
-    pdf.set_xy(15, pdf.get_y() + 3)
-    pdf.set_font("helvetica", "B", 10)
-    pdf.cell(0, 5, "Por favor consignar en la siguiente cuenta bancaria:", 0, 1)
-    pdf.set_font("helvetica", "", 10)
-    pdf.set_x(15)
-    pdf.cell(0, 5, f"Banco: {datos['banco']}  |  Tipo: {datos['tipo_cuenta']}  |  Número: {datos['num_cuenta']}", 0, 1)
-    pdf.set_x(15)
-    pdf.cell(0, 5, f"Titular: {datos['nombre_titular']}", 0, 1)
+    # Autorización Bancaria
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, "Autorizo me sea consignado en:", 0, 1)
+    pdf.set_font("helvetica", "B", 11)
+    pdf.cell(0, 6, f"CUENTA # {datos['num_cuenta']}", 0, 1)
+    pdf.cell(0, 6, f"{datos['tipo_cuenta'].upper()}", 0, 1)
+    pdf.cell(0, 6, f"NOMBRE DEL BANCO: {datos['banco'].upper()}", 0, 1)
+    pdf.cell(0, 6, f"NOMBRE TITULAR CUENTA: {datos['nombre_titular']}", 0, 1)
+    pdf.cell(0, 6, f"CEDULA TITULAR CUENTA: {datos['cedula_titular']}", 0, 1)
+    pdf.ln(15)
     
     # Firma
-    pdf.ln(20)
-    pdf.set_x(15)
-    pdf.set_font("helvetica", "B", 10)
-    pdf.cell(80, 5, datos['nombre_titular'], "T", 1, "C")
-    pdf.set_x(15)
-    pdf.set_font("helvetica", "", 9)
-    pdf.cell(80, 5, f"C.C. {datos['cedula_titular']}", 0, 1, "C")
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(0, 6, "Atentamente,", 0, 1)
+    pdf.ln(12)
+    pdf.set_font("helvetica", "B", 11)
+    pdf.cell(80, 5, datos['nombre_titular'], "T", 1, "L")
+    pdf.set_font("helvetica", "", 11)
+    pdf.cell(80, 5, f"C.C {datos['cedula_titular']}", 0, 1, "L")
     
     return pdf.output()
 
@@ -222,9 +208,26 @@ def generar_excel_documento_equivalente(datos):
     ws['C13'] = f"Servicio mensajería ({datos['corte_fechas']})"
     ws.merge_cells('C13:E13')
     ws['F13'] = 1
-    ws['G13'] = datos['ingreso_bruto']
-    ws['H13'] = datos['ingreso_bruto']
+    ws['G13'] = datos['ingreso_base']
+    ws['H13'] = datos['ingreso_base']
 
+    # Fila para Fuera de Perímetro si aplica
+    fila_subtotal = 15
+    if datos.get('fuera_perimetro', 0) > 0:
+        ws['B14'] = 2
+        ws['C14'] = "Servicios Fuera de Perímetro"
+        ws.merge_cells('C14:E14')
+        ws['F14'] = 1
+        ws['G14'] = datos['fuera_perimetro']
+        ws['H14'] = datos['fuera_perimetro']
+        for c in ['B14', 'C14', 'F14', 'G14', 'H14']:
+            ws[c].border = border
+        ws['G14'].number_format = '"$"#,##0'
+        ws['H14'].number_format = '"$"#,##0'
+        ws['B14'].alignment = center_align
+        ws['F14'].alignment = center_align
+        fila_subtotal = 16
+    
     for c in ['B13', 'C13', 'F13', 'G13', 'H13']:
         ws[c].border = border
     ws['G13'].number_format = '"$"#,##0'
@@ -232,22 +235,22 @@ def generar_excel_documento_equivalente(datos):
     ws['B13'].alignment = center_align
     ws['F13'].alignment = center_align
 
-    ws['G15'] = "SUBTOTAL:"
-    ws['H15'] = datos['ingreso_bruto']
-    ws['G16'] = "Retefuente (1%):"
-    ws['H16'] = -datos['retefuente']
-    ws['G17'] = "ICA (1%):"
-    ws['H17'] = -datos['ica']
-    ws['G18'] = "TOTAL A PAGAR:"
-    ws['H18'] = datos['neto_pagar']
+    ws[f'G{fila_subtotal}'] = "SUBTOTAL:"
+    ws[f'H{fila_subtotal}'] = datos['ingreso_bruto_total']
+    ws[f'G{fila_subtotal+1}'] = "Retefuente (1%):"
+    ws[f'H{fila_subtotal+1}'] = -datos['retefuente']
+    ws[f'G{fila_subtotal+2}'] = "ICA (1%):"
+    ws[f'H{fila_subtotal+2}'] = -datos['ica']
+    ws[f'G{fila_subtotal+3}'] = "TOTAL A PAGAR:"
+    ws[f'H{fila_subtotal+3}'] = datos['neto_pagar']
 
-    for r in range(15, 19):
+    for r in range(fila_subtotal, fila_subtotal+4):
         ws[f'G{r}'].font = bold_font
         ws[f'G{r}'].alignment = right_align
         ws[f'H{r}'].number_format = '"$"#,##0'
         ws[f'H{r}'].border = border
-    ws['H18'].font = bold_font
-    ws['H18'].fill = PatternFill(start_color="e6f2ff", end_color="e6f2ff", fill_type="solid")
+    ws[f'H{fila_subtotal+3}'].font = bold_font
+    ws[f'H{fila_subtotal+3}'].fill = PatternFill(start_color="e6f2ff", end_color="e6f2ff", fill_type="solid")
 
     ws.column_dimensions['B'].width = 8
     ws.column_dimensions['C'].width = 15
@@ -274,7 +277,7 @@ with col2:
 st.markdown("""
 <div class="instrucciones">
     <strong>💡 Instrucciones:</strong><br>
-    Asegúrese de haber actualizado las horas en el archivo de Google Sheets (pestañas <i>CUENTAS</i> y <i>PAGOS PERSONAL</i>). 
+    Asegúrese de haber actualizado las horas en el archivo de Google Sheets. 
     Cuando esté listo, presione el botón rojo para generar automáticamente todos los documentos de la quincena.
 </div>
 """, unsafe_allow_html=True)
@@ -288,10 +291,9 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
             try:
                 data = response.json()
             except Exception as e:
-                st.error("Error conectando a la base de datos. Verifique que el script de Google esté publicado correctamente.")
+                st.error("Error conectando a la base de datos.")
                 st.stop()
             
-            st.write("⚙️ Calculando Retefuente e ICA por ciudad...")
             df_cuentas = pd.DataFrame(data.get('cuentas', []))
             df_pagos = pd.DataFrame(data.get('pagos', []))
             
@@ -299,7 +301,11 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                 st.warning("No se encontraron datos en las pestañas de Sheets.")
                 st.stop()
             
-            df_pagos['CIUDAD'] = df_pagos['CIUDAD'].astype(str).str.upper().str.strip()
+            # BLOQUE DE DEPURACIÓN: Muestra al usuario las columnas reales que llegan
+            st.write("🔍 **Validando Columnas del Archivo:**")
+            st.write(df_pagos.columns.tolist())
+            
+            df_pagos['CIUDAD'] = df_pagos.get('CIUDAD', '').astype(str).str.upper().str.strip()
             df_completo = pd.merge(
                 df_pagos, 
                 df_cuentas[['NOMBRE DEL CONDUCTOR (PLANILLA)', 'NOMBRE DEL TITULAR DE LA CUENTA', 'DOCUMENTO DEL TITULAR DE LA CUENTA', 'NOMBRE DE LA ENTIDAD FINANCIERA - BANCO', 'TIPO DE CUENTA (AHORROS-CORRIENTE)', 'NUMERO DE CUENTA']], 
@@ -315,38 +321,55 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 contador = 1
                 for index, row in df_completo.iterrows():
-                    valor_crudo = str(row.get('TOTAL A PAGAR', '0')).replace('$', '').replace(',', '').strip()
+                    
+                    # Extraer el valor a pagar. Si 'TOTAL A PAGAR' no existe, prueba con 'TOTAL'
+                    valor_crudo = str(row.get('TOTAL A PAGAR', row.get('TOTAL', '0'))).replace('$', '').replace(',', '').strip()
                     try:
-                        ingreso_bruto = float(valor_crudo)
+                        ingreso_base = float(valor_crudo)
                     except ValueError:
-                        ingreso_bruto = 0.0
+                        ingreso_base = 0.0
 
-                    if ingreso_bruto > 0:
-                        retefuente = ingreso_bruto * 0.01
-                        ica = ingreso_bruto * 0.01 if row['CIUDAD'] == 'CALI' else 0.0
-                        neto_a_pagar = ingreso_bruto - retefuente - ica
+                    nombre_conductor = str(row.get('CONDUCTOR', '')).upper()
+                    
+                    # Lógica para "Fuera de Perímetro" de Milton Javier Cortes (o quien aplique)
+                    fuera_perimetro = 0.0
+                    if "MILTON" in nombre_conductor and 'FUERA DE PERIMETRO' in row:
+                        try:
+                            fp_crudo = str(row.get('FUERA DE PERIMETRO', '0')).replace('$', '').replace(',', '').strip()
+                            fuera_perimetro = float(fp_crudo)
+                        except:
+                            pass
+                    
+                    ingreso_bruto_total = ingreso_base + fuera_perimetro
+
+                    if ingreso_bruto_total > 0:
+                        retefuente = ingreso_bruto_total * 0.01
+                        ica = ingreso_bruto_total * 0.01 if row.get('CIUDAD', '') == 'CALI' else 0.0
+                        neto_a_pagar = ingreso_bruto_total - retefuente - ica
                         
                         nombre_titular = str(row.get('NOMBRE DEL TITULAR DE LA CUENTA', 'S/N'))
                         
                         pagos_procesados.append({
-                            'NIT_TITULAR': str(row.get('DOCUMENTO DEL TITULAR DE LA CUENTA', '')),
+                            'DOCUMENTO_TITULAR': str(row.get('DOCUMENTO DEL TITULAR DE LA CUENTA', '')),
                             'NOMBRE_TITULAR': nombre_titular,
                             'BANCO': str(row.get('NOMBRE DE LA ENTIDAD FINANCIERA - BANCO', '')),
                             'TIPO_CUENTA': str(row.get('TIPO DE CUENTA (AHORROS-CORRIENTE)', '')),
-                            'NUM_CUENTA': str(row.get('NUMERO DE CUENTA', '')),
-                            'NETO_A_PAGAR': round(neto_a_pagar, 0)
+                            'NUMERO_CUENTA': str(row.get('NUMERO DE CUENTA', '')),
+                            'VALOR_A_PAGAR': round(neto_a_pagar, 0)
                         })
                         
                         datos_doc = {
                             'id': str(contador).zfill(3),
-                            'fecha_actual': '16/08/2026',
+                            'fecha_actual': '16 JULIO DEL 2026', # Idealmente, calcular dinámicamente con Python datetime
                             'nombre_titular': nombre_titular,
                             'cedula_titular': str(row.get('DOCUMENTO DEL TITULAR DE LA CUENTA', '')),
-                            'nombre_conductor': str(row.get('CONDUCTOR', '')),
+                            'nombre_conductor': nombre_conductor,
                             'cedula_conductor': str(row.get('CÉDULA', '')),
-                            'ciudad': row['CIUDAD'],
-                            'corte_fechas': str(row.get('CORTE', '1 AL 15 AGOSTO')),
-                            'ingreso_bruto': ingreso_bruto,
+                            'ciudad': row.get('CIUDAD', 'JAMUNDI'),
+                            'corte_fechas': str(row.get('CORTE', '16 AL 31 DE AGOSTO DE 2026')),
+                            'ingreso_base': ingreso_base,
+                            'fuera_perimetro': fuera_perimetro,
+                            'ingreso_bruto_total': ingreso_bruto_total,
                             'retefuente': retefuente,
                             'ica': ica,
                             'neto_pagar': neto_a_pagar,
@@ -359,15 +382,11 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                         zip_file.writestr(f"Docs_Equivalentes/{contador}_{nombre_titular.replace(' ', '_')}_DocEq.xlsx", generar_excel_documento_equivalente(datos_doc))
                         contador += 1
                 
-                # --- SOLUCIÓN APLICADA AQUÍ: Esto ahora está DENTRO de la indentación del 'with' ---
                 df_resultado = pd.DataFrame(pagos_procesados)
                 zip_file.writestr("Archivo_Plano_Bancario.csv", df_resultado.to_csv(index=False, sep=';').encode('utf-8'))
             
-            # --- Esto puede quedar fuera porque opera en el buffer en memoria, no sobre la función zip ---
             zip_buffer.seek(0)
-            
             status.update(label="¡Proceso finalizado con éxito!", state="complete", expanded=False)
-            
             st.success(f"✅ ¡Todo listo! Se procesaron {len(df_resultado)} pagos.")
             
             st.download_button(
@@ -380,7 +399,7 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
             )
 
             st.divider()
-            st.subheader("Vista Previa - Consolidado Bancario")
+            st.subheader("Vista Previa - Consolidado Bancario para Don José")
             st.dataframe(df_resultado, use_container_width=True)
 
         except Exception as e:
