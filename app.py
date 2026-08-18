@@ -401,21 +401,13 @@ def limpiar_dinero(val):
         return 0.0
 
 # --- INTERFAZ DE USUARIO ---
-# Ajustamos la proporción para darle más espacio visual al logo
-col1, col2 = st.columns([1.5, 3.5]) 
-
+col1, col2 = st.columns([1, 4])
 with col1:
     try:
-        # Usamos el nuevo archivo y aumentamos el ancho a 250 (o el valor que prefieras)
-        st.image("sergemLogo.png", width=250) 
-        
-        
+        st.image("sergemLogo.png", width=140)
     except:
         pass
-
 with col2:
-    # Agregamos un poco de espacio superior para alinear el texto con el centro del logo
-    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
     st.title("Generador de Pagos y Documentos")
     st.markdown("**SERGEM Mensajería S.A.S.**")
 
