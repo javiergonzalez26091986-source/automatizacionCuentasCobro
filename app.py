@@ -243,6 +243,13 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
 
 def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.add_page()
+    
+    # Inserción del logo para el PDF del Documento Equivalente
+    try:
+        if os.path.exists('sergemLogo.png'):
+            pdf.image('sergemLogo.png', 10, 8, w=45)
+    except:
+        pass
 
     pdf.set_font('helvetica', 'B', 10)
     pdf.cell(0, 5, "DOCUMENTO EQUIVALENTE A LA FACTURA DE VENTA", 0, 1, 'R')
@@ -397,6 +404,16 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     border_thin = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
     center_align = Alignment(horizontal="center", vertical="center")
     right_align = Alignment(horizontal="right", vertical="center")
+
+    # Inserción del logo para el Excel del Documento Equivalente
+    try:
+        if os.path.exists('sergemLogo.png'):
+            img = XLImage('sergemLogo.png')
+            img.width = 150
+            img.height = 60
+            ws.add_image(img, 'B2')
+    except: 
+        pass
 
     ws.merge_cells('D2:H4')
     ws['D2'] = "DOCUMENTO EQUIVALENTE A LA FACTURA DE VENTA\n(DECRETO 522 DE 2003)\nDOCUMENTO SOPORTE EN ADQUISICIONES A NO OBLIGADOS A FACTURAR"
@@ -583,17 +600,15 @@ def obtener_nombre_columna(df, opciones):
 # ==============================================================================
 # INTERFAZ DE USUARIO
 # ==============================================================================
-# Ajustamos las columnas para mostrar el logo a la izquierda del título en la web
-col1, col2 = st.columns([1, 4])
+col1, col2 = st.columns([1.5, 3.5])
 with col1:
+    # Mostramos el logo de forma directa y explícita en la web
     try:
-        if os.path.exists("sergemLogo.png"):
-            st.image("sergemLogo.png", use_column_width=True)
-        elif os.path.exists("sergemLogo_2.png"):
-            st.image("sergemLogo_2.png", use_column_width=True)
+        st.image("sergemLogo.png", width=200)
     except:
         pass
 with col2:
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
     st.title("Generador Automático de Documentos")
     st.markdown("**SERGEM Mensajería S.A.S.**")
 
