@@ -101,6 +101,56 @@ def limpiar_dinero(val):
     except: return 0.0
 
 # ==============================================================================
+# GENERACIÓN DE ARCHIVO PLANO BANCARIO (ESTRUCTURA EXACTA TXT)
+# ==============================================================================
+def generar_txt_banco(df_banco):
+    lineas = []
+    zona_colombia = timezone(timedelta(hours=-5))
+    hoy = datetime.now(zona_colombia)
+    fecha_ymd = hoy.strftime("%Y%m%d")
+    fecha_dmy = hoy.strftime("%d/%m/%Y").ljust(13)
+    
+    num_registros = len(df_banco)
+    suma_total = int(df_banco['VALOR_NETO_A_PAGAR'].sum() * 100)
+    
+    # 1. Encabezado (Tipo 1)
+    header = (
+        f"1000000900561833I               225NOMINA    "
+        f"{fecha_ymd}AA{fecha_ymd}"
+        f"{num_registros:06d}"
+        f"00000000000000000"
+        f"{suma_total:017d}"
+        f"81016173001D"
+    )
+    lineas.append(header)
+    
+    # 2. Detalles (Tipo 6)
+    for _, row in df_banco.iterrows():
+        cedula = str(row['NIT_BENEFICIARIO']).replace('.', '').replace(' ', '').replace(',', '')
+        cedula = cedula.zfill(15)[:15]
+        
+        nombre = str(row['NOMBRE_BENEFICIARIO']).upper().ljust(30)[:30]
+        
+        banco = "005600078" # Código de enrutamiento bancario base
+        
+        cuenta = str(row['NUMERO_CUENTA']).replace("'", "").strip().ljust(18)[:18]
+        
+        tipo_cta = "37" if "AHORRO" in str(row['TIPO_CUENTA']).upper() else "27"
+        
+        valor = int(row['VALOR_NETO_A_PAGAR'] * 100)
+        valor_str = f"{valor:017d}"
+        
+        filler = "00000                                                                                               000000000000000                           "
+        
+        linea = (
+            f"6{cedula}{nombre}{banco}{cuenta}{tipo_cta}{valor_str}"
+            f"{fecha_ymd}NOMINA   {fecha_dmy}{filler}"
+        )
+        lineas.append(linea)
+        
+    return "\n".join(lineas)
+
+# ==============================================================================
 # LÓGICA DE PDFS 
 # ==============================================================================
 def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
@@ -534,7 +584,6 @@ if "Individual" in modo_trabajo:
             pdf_ct = FPDF(); agregar_pagina_pdf_cuenta_cobro(pdf_ct, datos_doc)
             pdf_eq = FPDF(); agregar_pagina_pdf_doc_equivalente(pdf_eq, datos_doc)
             
-            # --- CORRECCIÓN BINARIA APLICADA AQUÍ ---
             out_ct = pdf_ct.output()
             pdf_ct_bytes = out_ct.encode('latin-1') if isinstance(out_ct, str) else bytes(out_ct)
             
@@ -595,25 +644,31 @@ else:
                     })
                     contador += 1
                 
-                # --- CORRECCIÓN BINARIA APLICADA AQUÍ ---
                 out_maestro_cuentas = pdf_maestro_cuentas.output()
                 pdf_maestro_ct_bytes = out_maestro_cuentas.encode('latin-1') if isinstance(out_maestro_cuentas, str) else bytes(out_maestro_cuentas)
-                zip_file.writestr("1_IMPRESION_MASIVA_Cuentas_de_Cobro.pdf", pdf_maestro_ct_bytes)
+                zip_file.writestr("1_SUPER_IMPRESION_Cuentas_de_Cobro.pdf", pdf_maestro_ct_bytes)
                 
                 out_maestro_eq = pdf_maestro_equivalentes.output()
                 pdf_maestro_eq_bytes = out_maestro_eq.encode('latin-1') if isinstance(out_maestro_eq, str) else bytes(out_maestro_eq)
-                zip_file.writestr("2_IMPRESION_MASIVA_Documentos_Equivalentes.pdf", pdf_maestro_eq_bytes)
+                zip_file.writestr("2_SUPER_IMPRESION_Documentos_Equivalentes.pdf", pdf_maestro_eq_bytes)
                 
                 excel_maestro_io = io.BytesIO()
                 wb_maestro_equivalentes.save(excel_maestro_io)
                 excel_maestro_io.seek(0)
                 zip_file.writestr("3_ARCHIVO_Documentos_Equivalentes_Pestañas.xlsx", excel_maestro_io.read())
                 
+                # --- NUEVA INTEGRACIÓN: ARCHIVO PLANO EN TXT Y FORMATO EN EXCEL ---
                 df_banco = pd.DataFrame(pagos_procesados_banco)
+                
+                # 1. Archivo Plano (.txt) estructurado para subir al portal
+                texto_banco = generar_txt_banco(df_banco)
+                zip_file.writestr(f"4_PLANO_BANCARIO_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.txt", texto_banco)
+
+                # 2. Archivo en Excel para revisión visual de Yesenia
                 excel_banco_io = io.BytesIO()
                 df_banco.to_excel(excel_banco_io, index=False, sheet_name="PLANO_BANCO")
                 excel_banco_io.seek(0)
-                zip_file.writestr(f"00_FORMATO_PLANO_BANCO_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.xlsx", excel_banco_io.read())
+                zip_file.writestr(f"5_REVISION_PLANO_BANCO_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.xlsx", excel_banco_io.read())
             
             zip_buffer.seek(0)
             mensaje_carga.empty() 
@@ -629,8 +684,8 @@ else:
                     use_container_width=True
                 )
                 st.divider()
-                st.subheader("Vista Previa - Datos que irán al Banco")
-                st.dataframe(df_banco, use_container_width=True)
+                st.subheader("Vista Previa - Datos del Banco")
+                st.text_area("Previsualización Archivo Plano (.txt)", texto_banco, height=250)
 
         except Exception as e:
             mensaje_carga.empty()
