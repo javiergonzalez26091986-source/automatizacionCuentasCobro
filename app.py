@@ -22,7 +22,7 @@ st.divider()
 # Input para la conexión con Sheets
 GAS_URL = st.text_input(
     "URL de conexión (Google Apps Script):", 
-    placeholder="Pega aquí la URL que termina en /exec..."
+    placeholder="https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp40hdIzJeEm4dKNLBgDVxwEY95T0EIoBu_qo8FB/exec."
 )
 
 if st.button("Sincronizar Datos y Calcular Nómina", type="primary"):
