@@ -14,7 +14,7 @@ from openpyxl.drawing.image import Image as XLImage
 # 1. CONFIGURACIÓN DE LA PÁGINA Y PANEL DE ESTILOS CSS
 # ==============================================================================
 icono_pestana = "sergemLogo.ico" if os.path.exists("sergemLogo.ico") else "sergemLogo.png"
-st.set_page_config(page_title="SERGEM - Nómina y Cuentas", page_icon=icono_pestana, layout="wide")
+st.set_page_config(page_title="SERGEM - Generador automático de documentos", page_icon=icono_pestana, layout="wide")
 
 st.markdown("""
     <style>
