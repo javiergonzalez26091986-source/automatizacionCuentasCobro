@@ -46,10 +46,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- URL INTEGRADA (Oculta al usuario) ---
+# --- URL INTEGRADA ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp40hdIzJeEm4dKNLBgDVxwEY95T0EIoBu_qo8FB/exec"
 
-# --- CLASE PARA PDF CON EL NUEVO FORMATO DE LA CLIENTA ---
+# --- CLASE PARA PDF CON EL FORMATO DE LA CLIENTA ---
 class PDFCuentaCobro(FPDF):
     def header(self):
         try:
@@ -71,8 +71,8 @@ def generar_pdf_cuenta_cobro(datos):
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("helvetica", "B", 11)
     
-    # Fecha y Ciudad (Ej: JAMUNDI 16 JULIO DEL 2026)
-    pdf.cell(0, 6, f"{datos['ciudad']} {datos['fecha_actual']}".upper(), 0, 1)
+    # Ciudad y Fecha
+    pdf.cell(0, 6, f"{datos['ciudad']} {datos['corte_fechas']}".upper(), 0, 1)
     pdf.ln(8)
     
     # Debe a
@@ -80,12 +80,12 @@ def generar_pdf_cuenta_cobro(datos):
     pdf.cell(0, 6, "Debe a:", 0, 1)
     
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 6, datos['nombre_titular'], 0, 1)
+    pdf.cell(0, 6, str(datos['nombre_titular']).upper(), 0, 1)
     pdf.set_font("helvetica", "", 11)
     pdf.cell(0, 6, f"C.C {datos['cedula_titular']}", 0, 1)
     pdf.ln(5)
 
-    # Detalle de pago
+    # Detalle de pago (Valores NETOS según audio 3)
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(60, 6, "VALOR BASE:", 0, 0)
     pdf.set_font("helvetica", "", 11)
@@ -97,19 +97,8 @@ def generar_pdf_cuenta_cobro(datos):
         pdf.set_font("helvetica", "", 11)
         pdf.cell(0, 6, f"$ {datos['fuera_perimetro']:,.0f}", 0, 1)
 
-    pdf.set_font("helvetica", "B", 11)
-    pdf.cell(60, 6, "RETEFUENTE (1%):", 0, 0)
-    pdf.set_font("helvetica", "", 11)
-    pdf.cell(0, 6, f"- $ {datos['retefuente']:,.0f}", 0, 1)
-
-    if datos['ica'] > 0:
-        pdf.set_font("helvetica", "B", 11)
-        pdf.cell(60, 6, "ICA (1%):", 0, 0)
-        pdf.set_font("helvetica", "", 11)
-        pdf.cell(0, 6, f"- $ {datos['ica']:,.0f}", 0, 1)
-
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(60, 8, "VALOR TOTAL A PAGAR:", 0, 0)
+    pdf.cell(60, 8, "VALOR TOTAL NETO A PAGAR:", 0, 0)
     pdf.cell(0, 8, f"$ {datos['neto_pagar']:,.0f}", 0, 1)
     pdf.ln(8)
     
@@ -117,7 +106,7 @@ def generar_pdf_cuenta_cobro(datos):
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(25, 6, "CONCEPTO:", 0, 0)
     pdf.set_font("helvetica", "", 11)
-    concepto = f"SERVICIO PRESTADO EN EL CORTE DEL {datos['corte_fechas']}, POR EL CONDUCTOR {datos['nombre_conductor']} CÉDULA {datos['cedula_conductor']}."
+    concepto = f"SERVICIO PRESTADO EN EL CORTE DE {datos['corte_fechas']}, POR EL CONDUCTOR {datos['nombre_conductor']} CÉDULA {datos['cedula_conductor']}."
     pdf.multi_cell(0, 6, concepto)
     pdf.ln(10)
     
@@ -129,7 +118,7 @@ def generar_pdf_cuenta_cobro(datos):
     pdf.cell(0, 6, f"{datos['tipo_cuenta'].upper()}", 0, 1)
     pdf.cell(0, 6, f"NOMBRE DEL BANCO: {datos['banco'].upper()}", 0, 1)
     pdf.cell(0, 6, f"NOMBRE TITULAR CUENTA: {datos['nombre_titular']}", 0, 1)
-    pdf.cell(0, 6, f"CEDULA TITULAR CUENTA: {datos['cedula_titular']}", 0, 1)
+    pdf.cell(0, 6, f"CÉDULA TITULAR CUENTA: {datos['cedula_titular']}", 0, 1)
     pdf.ln(15)
     
     # Firma
@@ -137,7 +126,7 @@ def generar_pdf_cuenta_cobro(datos):
     pdf.cell(0, 6, "Atentamente,", 0, 1)
     pdf.ln(12)
     pdf.set_font("helvetica", "B", 11)
-    pdf.cell(80, 5, datos['nombre_titular'], "T", 1, "L")
+    pdf.cell(80, 5, str(datos['nombre_titular']).upper(), "T", 1, "L")
     pdf.set_font("helvetica", "", 11)
     pdf.cell(80, 5, f"C.C {datos['cedula_titular']}", 0, 1, "L")
     
@@ -178,8 +167,8 @@ def generar_excel_documento_equivalente(datos):
     ws['G5'] = "Documento No:"
     ws['H5'] = datos['id']
     ws['H5'].font = bold_font
-    ws['G6'] = "Fecha:"
-    ws['H6'] = datos['fecha_actual']
+    ws['G6'] = "Corte:"
+    ws['H6'] = datos['corte_fechas']
 
     ws['B8'] = "DATOS DEL BENEFICIARIO / PROVEEDOR"
     ws['B8'].font = Font(bold=True, color="E3000F")
@@ -287,32 +276,19 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
         try:
             st.write("📥 Leyendo datos desde Google Sheets...")
             response = requests.get(GAS_URL)
+            data = response.json()
             
-            try:
-                data = response.json()
-            except Exception as e:
-                st.error("Error conectando a la base de datos.")
-                st.stop()
-            
-            df_cuentas = pd.DataFrame(data.get('cuentas', []))
             df_pagos = pd.DataFrame(data.get('pagos', []))
+            df_fuera = pd.DataFrame(data.get('fuera_perimetro', [])) # Por si existe la hoja 3 que mencionó en el audio
             
-            if df_pagos.empty or df_cuentas.empty:
-                st.warning("No se encontraron datos en las pestañas de Sheets.")
+            if df_pagos.empty:
+                st.warning("No se encontraron datos en Google Sheets.")
                 st.stop()
             
-            # BLOQUE DE DEPURACIÓN: Muestra al usuario las columnas reales que llegan
-            st.write("🔍 **Validando Columnas del Archivo:**")
-            st.write(df_pagos.columns.tolist())
-            
-            df_pagos['CIUDAD'] = df_pagos.get('CIUDAD', '').astype(str).str.upper().str.strip()
-            df_completo = pd.merge(
-                df_pagos, 
-                df_cuentas[['NOMBRE DEL CONDUCTOR (PLANILLA)', 'NOMBRE DEL TITULAR DE LA CUENTA', 'DOCUMENTO DEL TITULAR DE LA CUENTA', 'NOMBRE DE LA ENTIDAD FINANCIERA - BANCO', 'TIPO DE CUENTA (AHORROS-CORRIENTE)', 'NUMERO DE CUENTA']], 
-                left_on='CONDUCTOR', 
-                right_on='NOMBRE DEL CONDUCTOR (PLANILLA)', 
-                how='left'
-            )
+            # CRÍTICO: Limpiar los nombres de las columnas quitando espacios al inicio y final
+            df_pagos.columns = df_pagos.columns.str.strip()
+            if not df_fuera.empty:
+                df_fuera.columns = df_fuera.columns.str.strip()
 
             st.write("📄 Creando Cuentas de Cobro y Documentos Equivalentes...")
             pagos_procesados = []
@@ -320,62 +296,72 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
             
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                 contador = 1
-                for index, row in df_completo.iterrows():
+                for index, row in df_pagos.iterrows():
                     
-                    # Extraer el valor a pagar. Si 'TOTAL A PAGAR' no existe, prueba con 'TOTAL'
-                    valor_crudo = str(row.get('TOTAL A PAGAR', row.get('TOTAL', '0'))).replace('$', '').replace(',', '').strip()
+                    # Extraer el valor base
+                    valor_crudo = str(row.get('TOTAL A PAGAR', '0')).replace('$', '').replace(',', '').replace('.', '').strip()
                     try:
                         ingreso_base = float(valor_crudo)
                     except ValueError:
                         ingreso_base = 0.0
 
-                    nombre_conductor = str(row.get('CONDUCTOR', '')).upper()
+                    nombre_conductor = str(row.get('CONDUCTOR', '')).upper().strip()
+                    ciudad = str(row.get('CIUDAD', '')).upper().strip()
                     
-                    # Lógica para "Fuera de Perímetro" de Milton Javier Cortes (o quien aplique)
+                    # Lógica para "Fuera de Perímetro" de Milton Javier Cortes
                     fuera_perimetro = 0.0
-                    if "MILTON" in nombre_conductor and 'FUERA DE PERIMETRO' in row:
-                        try:
-                            fp_crudo = str(row.get('FUERA DE PERIMETRO', '0')).replace('$', '').replace(',', '').strip()
-                            fuera_perimetro = float(fp_crudo)
-                        except:
-                            pass
-                    
+                    if "MILTON" in nombre_conductor:
+                        # Si la hoja adicional de fuera de perímetro existe en la API, la buscamos
+                        if not df_fuera.empty and 'CONDUCTOR' in df_fuera.columns:
+                            match = df_fuera[df_fuera['CONDUCTOR'].str.upper().str.contains("MILTON", na=False)]
+                            if not match.empty:
+                                val_fp = str(match.iloc[0].get('VALOR', '0')).replace('$', '').replace(',', '').replace('.', '').strip()
+                                try:
+                                    fuera_perimetro = float(val_fp)
+                                except:
+                                    pass
+
                     ingreso_bruto_total = ingreso_base + fuera_perimetro
 
+                    # Solo procesa si hay dinero a pagar
                     if ingreso_bruto_total > 0:
                         retefuente = ingreso_bruto_total * 0.01
-                        ica = ingreso_bruto_total * 0.01 if row.get('CIUDAD', '') == 'CALI' else 0.0
+                        ica = ingreso_bruto_total * 0.01 if ciudad == 'CALI' else 0.0
                         neto_a_pagar = ingreso_bruto_total - retefuente - ica
                         
-                        nombre_titular = str(row.get('NOMBRE DEL TITULAR DE LA CUENTA', 'S/N'))
+                        nombre_titular = str(row.get('A NOMBRE DE QUIEN HACE CUENTA DE COBRO', row.get('NOMBRE TITULAR CUENTA BANCARIA', 'S/N')))
+                        cedula_titular = str(row.get('CÉDULA DE CUENTA DE COBRO', row.get('CÉDULA TITULAR', '')))
+                        banco = str(row.get('BANCO', ''))
+                        tipo_cuenta = str(row.get('TIPO CUENTA', ''))
+                        num_cuenta = str(row.get('NO. CUENTA', ''))
                         
+                        # Archivo plano para Don José
                         pagos_procesados.append({
-                            'DOCUMENTO_TITULAR': str(row.get('DOCUMENTO DEL TITULAR DE LA CUENTA', '')),
-                            'NOMBRE_TITULAR': nombre_titular,
-                            'BANCO': str(row.get('NOMBRE DE LA ENTIDAD FINANCIERA - BANCO', '')),
-                            'TIPO_CUENTA': str(row.get('TIPO DE CUENTA (AHORROS-CORRIENTE)', '')),
-                            'NUMERO_CUENTA': str(row.get('NUMERO DE CUENTA', '')),
-                            'VALOR_A_PAGAR': round(neto_a_pagar, 0)
+                            'CÉDULA': cedula_titular,
+                            'NOMBRE': nombre_titular,
+                            'BANCO': banco,
+                            'TIPO CUENTA': tipo_cuenta,
+                            'NÚMERO CUENTA': f"'{num_cuenta}", # La comilla evita que Excel convierta el número en formato científico
+                            'VALOR A PAGAR': round(neto_a_pagar, 0)
                         })
                         
                         datos_doc = {
                             'id': str(contador).zfill(3),
-                            'fecha_actual': '16 JULIO DEL 2026', # Idealmente, calcular dinámicamente con Python datetime
                             'nombre_titular': nombre_titular,
-                            'cedula_titular': str(row.get('DOCUMENTO DEL TITULAR DE LA CUENTA', '')),
+                            'cedula_titular': cedula_titular,
                             'nombre_conductor': nombre_conductor,
-                            'cedula_conductor': str(row.get('CÉDULA', '')),
-                            'ciudad': row.get('CIUDAD', 'JAMUNDI'),
-                            'corte_fechas': str(row.get('CORTE', '16 AL 31 DE AGOSTO DE 2026')),
+                            'cedula_conductor': str(row.get('CEDULA', '')),
+                            'ciudad': ciudad,
+                            'corte_fechas': str(row.get('CORTE', '')),
                             'ingreso_base': ingreso_base,
                             'fuera_perimetro': fuera_perimetro,
                             'ingreso_bruto_total': ingreso_bruto_total,
                             'retefuente': retefuente,
                             'ica': ica,
                             'neto_pagar': neto_a_pagar,
-                            'banco': str(row.get('NOMBRE DE LA ENTIDAD FINANCIERA - BANCO', '')),
-                            'tipo_cuenta': str(row.get('TIPO DE CUENTA (AHORROS-CORRIENTE)', '')),
-                            'num_cuenta': str(row.get('NUMERO DE CUENTA', ''))
+                            'banco': banco,
+                            'tipo_cuenta': tipo_cuenta,
+                            'num_cuenta': num_cuenta
                         }
 
                         zip_file.writestr(f"Cuentas_Cobro/{contador}_{nombre_titular.replace(' ', '_')}_Cuenta.pdf", generar_pdf_cuenta_cobro(datos_doc))
@@ -383,7 +369,7 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                         contador += 1
                 
                 df_resultado = pd.DataFrame(pagos_procesados)
-                zip_file.writestr("Archivo_Plano_Bancario.csv", df_resultado.to_csv(index=False, sep=';').encode('utf-8'))
+                zip_file.writestr("Archivo_Plano_Bancario.csv", df_resultado.to_csv(index=False, sep=';', encoding='utf-8-sig'))
             
             zip_buffer.seek(0)
             status.update(label="¡Proceso finalizado con éxito!", state="complete", expanded=False)
