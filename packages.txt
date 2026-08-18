@@ -1,4 +1,6 @@
-libcairo2-dev
-libpango1.0-dev
-libgdk-pixbuf2.0-dev
-shared-mime-info
+libpango-1.0-0
+libharfbuzz0b
+libpangoft2-1.0-0
+libjpeg-dev
+libopenjp2-7-dev
+libffi-dev
