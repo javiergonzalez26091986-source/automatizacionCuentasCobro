@@ -95,12 +95,11 @@ def limpiar_dinero(val):
     except: return 0.0
 
 def limpiar_texto(txt):
-    """Elimina dobles espacios y normaliza el texto para evitar errores de digitación cruzando bases."""
     if pd.isna(txt): return ""
     return re.sub(r'\s+', ' ', str(txt).upper().strip())
 
 def obtener_horas(row):
-    for col in ['HORAS', 'CANTIDAD DE HORAS', 'CANTIDAD HORAS', 'TOTAL HORAS', 'CANTIDAD']:
+    for col in ['HORAS', 'CANTIDAD DE HORAS', 'CANTIDAD HORAS', 'TOTAL HORAS', 'CANTIDAD', 'NUMERO DE HORAS']:
         if col in row.index:
             try:
                 val = float(row[col])
@@ -512,7 +511,6 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
 # PROCESO MATEMÁTICO PRINCIPAL (AGRUPADO POR TITULAR)
 # ==============================================================================
 def obtener_nombre_columna(df, opciones):
-    """Busca dinámicamente si existe alguna columna de la lista de opciones."""
     for op in opciones:
         for col in df.columns:
             if limpiar_texto(col) == limpiar_texto(op):
@@ -536,15 +534,21 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
     num_cuenta = str(row_titular.get('NO. CUENTA', '')).strip()
     ciudad_titular = str(row_titular.get('CIUDAD', '')).upper().strip()
 
-    # Ubicamos dinámicamente las columnas en df_fuera para evitar errores de tipeo o nombres en el Excel
-    col_f_corte = None
-    col_f_cond = None
-    col_f_total = None
-    
+    # Análisis de la pestaña de Fueras de Perímetro basado en la estructura de celdas y totales de la tabla
+    fuera_perimetro_neto = 0.0
     if not df_fuera.empty:
-        col_f_corte = obtener_nombre_columna(df_fuera, ['CORTE', 'PERIODO', 'FECHAS'])
-        col_f_cond = obtener_nombre_columna(df_fuera, ['CONDUCTOR', 'NOMBRE', 'NOMBRES', 'NOMBRE CONDUCTOR'])
-        col_f_total = obtener_nombre_columna(df_fuera, ['TOTAL', 'VALOR', 'TOTAL A PAGAR', 'NETO A PAGAR', 'VALOR TOTAL'])
+        # Buscamos columnas clave en la pestaña de fueras de perímetro
+        col_dest = obtener_nombre_columna(df_fuera, ['FUERA PERIMETRO CEDI', 'DESTINO', 'CIUDAD', 'LUGAR'])
+        col_val = obtener_nombre_columna(df_fuera, ['VALOR', 'PRECIO'])
+        col_cant = obtener_nombre_columna(df_fuera, ['CANTIDAD', 'CANT'])
+        col_tot = obtener_nombre_columna(df_fuera, ['TOTAL', 'VALOR TOTAL'])
+
+        # Si encontramos una estructura válida de tabla sumatoria por destino y cantidad
+        if col_dest and col_tot:
+            for _, f_row in df_fuera.iterrows():
+                val_tot_celda = limpiar_dinero(f_row.get(col_tot, 0))
+                if val_tot_celda > 0:
+                    fuera_perimetro_neto += val_tot_celda
 
     for _, row in grupo_df.iterrows():
         ingreso_neto_esperado = limpiar_dinero(row.get('TOTAL A PAGAR', 0))
@@ -554,16 +558,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
         ciudad = str(row.get('CIUDAD', '')).upper().strip()
         cedula_conductor = str(row.get('CEDULA', '')).strip()
         horas = obtener_horas(row)
-
-        fuera_perimetro_neto = 0.0
-        
-        # Búsqueda rigurosa y a prueba de errores de la salida fuera de perímetro
-        if col_f_corte and col_f_cond and col_f_total:
-            match = df_fuera[
-                (df_fuera[col_f_corte].apply(limpiar_texto) == limpiar_texto(corte_seleccionado)) & 
-                (df_fuera[col_f_cond].apply(limpiar_texto) == limpiar_texto(nombre_conductor))
-            ]
-            fuera_perimetro_neto = sum(match[col_f_total].apply(limpiar_dinero))
 
         total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
 
