@@ -10,12 +10,23 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.drawing.image import Image as XLImage
 
-# 1. Configuración de la página
-st.set_page_config(page_title="SERGEM - Generador de documentos", page_icon="sergemLogo.ico", layout="wide")
+# ==============================================================================
+# 1. CONFIGURACIÓN DE LA PÁGINA Y PANEL DE ESTILOS CSS
+# ==============================================================================
+icono_pestana = "sergemLogo.ico" if os.path.exists("sergemLogo.ico") else "sergemLogo.png"
+st.set_page_config(page_title="SERGEM - Nómina y Cuentas", page_icon=icono_pestana, layout="wide")
 
-# 2. Inyección de CSS corporativo
 st.markdown("""
-<style>
+    <style>
+    /* Ocultamiento absoluto de componentes nativos de desarrollo de Streamlit */
+    [data-testid="stHeader"] { display: none !important; }
+    [data-testid="stToolbar"] { display: none !important; }
+    .stAppDeployButton { display: none !important; }
+    #MainMenu { display: none !important; }
+    footer { display: none !important; }
+    div[class*="viewerBadge"], [data-testid="stAppCreatorBadge"] { display: none !important; }
+    
+    /* Paleta Corporativa SERGEM */
     .stApp { background-color: #F4F6F9; }
     .block-container {
         background-color: #FFFFFF;
@@ -26,17 +37,39 @@ st.markdown("""
         margin-bottom: 2rem;
     }
     h1, h2, h3, p, span, label, div { color: #1E293B; }
-    .stButton>button {
-        background-color: #E3000F !important;
-        color: white !important;
-        border-radius: 6px;
-        border: none;
-        padding: 0.75rem 1.5rem;
-        font-weight: bold;
-        font-size: 1.1rem;
-        transition: all 0.3s ease;
+    
+    /* Estilos para Menús y Cajas de texto */
+    .stSelectbox > div > div > div {
+        background-color: #f8fafc !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 8px !important;
+        color: #1e293b !important;
     }
-    .stButton>button:hover { background-color: #B3000C !important; box-shadow: 0px 4px 10px rgba(227, 0, 15, 0.3); }
+    
+    /* Configuración Estricta de Botones Flat */
+    div.stButton > button {
+        border-radius: 8px !important;
+        font-weight: 800 !important;
+        border: none !important;
+        transition: transform 0.1s ease !important;
+    }
+    div.stButton > button:active { transform: scale(0.98) !important; }
+    
+    /* Identificación por colores corporativos */
+    div.stButton > button[kind="primary"] { 
+        background-color: #E3000F !important; 
+        color: white !important; 
+        padding: 0.75rem 1.5rem;
+        font-size: 1.1rem;
+    }
+    div.stButton > button[kind="primary"]:hover { background-color: #B3000C !important; box-shadow: 0px 4px 10px rgba(227, 0, 15, 0.3); }
+    
+    div.stButton > button[kind="secondary"] { 
+        background-color: #94a3b8 !important; 
+        color: white !important; 
+    }
+    div.stButton > button[kind="secondary"]:hover { background-color: #64748b !important; }
+    
     .instrucciones {
         background-color: #f8fafc;
         border-left: 4px solid #E3000F;
@@ -44,8 +77,8 @@ st.markdown("""
         border-radius: 4px;
         margin-bottom: 2rem;
     }
-</style>
-""", unsafe_allow_html=True)
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- URL INTEGRADA ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp40hdIzJeEm4dKNLBgDVxwEY95T0EIoBu_qo8FB/exec"
@@ -57,8 +90,7 @@ def obtener_fecha_actual():
     return f"{hoy.day} DE {meses[hoy.month - 1]} DE {hoy.year}"
 
 # --- FUNCIÓN PARA CARGAR DATOS CON CACHÉ ---
-# Esto evita consultar Google Sheets repetitivamente mientras el usuario interactúa
-@st.cache_data(ttl=300) # Se actualiza cada 5 minutos
+@st.cache_data(ttl=600) # Se actualiza cada 10 min, salvo que se fuerce la sincronización
 def cargar_datos(url):
     try:
         response = requests.get(url)
@@ -382,7 +414,12 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# 1. CARGAMOS LOS DATOS PRIMERO
+# BOTÓN PARA FORZAR LA SINCRONIZACIÓN
+if st.button("🔄 Sincronizar Base de Datos", key="btn_sync", kind="secondary"):
+    st.cache_data.clear()
+    st.rerun()
+
+# 1. CARGAMOS LOS DATOS
 data_cruda = cargar_datos(GAS_URL)
 
 if not data_cruda:
@@ -403,7 +440,6 @@ if not df_fuera.empty:
 
 # 2. CREAMOS EL MENÚ DESPLEGABLE CON LOS CORTES
 if 'CORTE' in df_pagos_completo.columns:
-    # Filtramos valores nulos o vacíos para el menú
     cortes_disponibles = [c for c in df_pagos_completo['CORTE'].unique() if str(c).strip() != "" and str(c).lower() != "nan"]
     if cortes_disponibles:
         corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar:", cortes_disponibles)
@@ -415,7 +451,7 @@ else:
     st.stop()
 
 # 3. BOTÓN DE PROCESAMIENTO
-if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
+if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True, kind="primary"):
     
     mensaje_carga = st.info(f"📥 Procesando la información para el corte: {corte_seleccionado}...")
     
@@ -444,7 +480,13 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                 fuera_perimetro = 0.0
                 if "MILTON" in nombre_conductor and not df_fuera.empty:
                     if 'TOTAL' in df_fuera.columns:
-                        fuera_perimetro = sum(df_fuera['TOTAL'].apply(limpiar_dinero))
+                        # Aseguramos que solo sume los valores extras de ese corte
+                        if 'CORTE' in df_fuera.columns:
+                            match = df_fuera[df_fuera['CORTE'].astype(str).str.strip() == corte_seleccionado]
+                            fuera_perimetro = sum(match['TOTAL'].apply(limpiar_dinero))
+                        else:
+                            # Si la hoja no tiene columna CORTE, asume que todo lo que hay es para cobrar (no recomendado a futuro)
+                            fuera_perimetro = sum(df_fuera['TOTAL'].apply(limpiar_dinero))
 
                 ingreso_bruto_total = ingreso_base + fuera_perimetro
                 
@@ -475,7 +517,7 @@ if st.button("🚀 Procesar Nómina y Generar ZIP", use_container_width=True):
                     'nombre_conductor': nombre_conductor,
                     'cedula_conductor': str(row.get('CEDULA', '')).strip(),
                     'ciudad': ciudad,
-                    'corte_fechas': corte_seleccionado, # Usamos directamente el corte seleccionado
+                    'corte_fechas': corte_seleccionado,
                     'ingreso_base': ingreso_base,
                     'fuera_perimetro': fuera_perimetro,
                     'ingreso_bruto_total': ingreso_bruto_total,
