@@ -11,7 +11,7 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.drawing.image import Image as XLImage
 
 # 1. Configuración de la página
-st.set_page_config(page_title="SERGEM - Generados de documentos", page_icon="sergemLogo.ico", layout="wide")
+st.set_page_config(page_title="SERGEM - Generador de documentos", page_icon="sergemLogo.ico", layout="wide")
 
 # 2. Inyección de CSS corporativo
 st.markdown("""
