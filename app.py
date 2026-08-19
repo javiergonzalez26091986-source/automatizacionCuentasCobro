@@ -246,7 +246,6 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
 
     pdf.ln(8)
     
-    # Bloque de Descuentos Posteriores (Anticipos y ARL)
     if datos.get('anticipos', 0) > 0 or datos.get('otros_descuentos', 0) > 0:
         if datos.get('anticipos', 0) > 0:
             pdf.set_font("helvetica", "B", 11)
@@ -545,7 +544,6 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
         
     fila += 1
     
-    # Construcción dinámica de totales
     totales = [
         ("SUBTOTAL:", datos['ingreso_bruto_total']), 
         ("IVA (19%):", ""), ("RETEIVA:", ""), 
@@ -627,7 +625,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
     ciudad_titular = str(row_titular.get('CIUDAD', '')).upper().strip()
 
     for _, row in grupo_df.iterrows():
-        # Verificamos si en alguna fila se le marca como NUEVO
         if col_estado and str(row.get(col_estado, '')).strip().upper() == 'NUEVO':
             es_nuevo = True
             
@@ -706,7 +703,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
 
     if not conductores: return None
 
-    # Cálculo del neto real a desembolsar
     neto_final = suma_neto - suma_anticipos - suma_otros_desc
 
     return {
@@ -775,7 +771,6 @@ col_cedula_prestador = obtener_nombre_columna(df_pagos_completo, ['CÉDULA DE CU
 col_titular_banco = obtener_nombre_columna(df_pagos_completo, ['NOMBRE TITULAR CUENTA BANCARIA', 'NOMBRE_TITULAR'])
 col_cedula_banco = obtener_nombre_columna(df_pagos_completo, ['CÉDULA TITULAR', 'CEDULA TITULAR'])
 
-# Captura de nuevas columnas dictadas por Doña Yesenia
 col_estado = obtener_nombre_columna(df_pagos_completo, ['ESTADO', 'ESTADO_EMPLEADO'])
 col_anticipos = obtener_nombre_columna(df_pagos_completo, ['ANTICIPOS', 'ANTICIPO'])
 col_otros_desc = obtener_nombre_columna(df_pagos_completo, ['OTROS DESCUENTOS', 'OTROS_DESCUENTOS', 'DESCUENTOS'])
@@ -793,7 +788,7 @@ modo_trabajo = st.radio("⚙️ Modo de trabajo:",
                          "⏱️ Actualizador de Horas Automático (Excel a Drive)"], horizontal=True)
 
 # ==============================================================================
-# MODO ACTUALIZADOR DE HORAS
+# MODO ACTUALIZADOR DE HORAS (100% DINÁMICO A LA ESTRUCTURA DE LA BD)
 # ==============================================================================
 if "Actualizador" in modo_trabajo:
     st.markdown("### ⏱️ Depurador y Actualizador de Horas (De Sistema a Drive)")
@@ -817,16 +812,14 @@ if "Actualizador" in modo_trabajo:
                 agg_dict[col_horas] = 'sum'
                 grouped = df_raw.groupby(col_cc, as_index=False).agg(agg_dict)
                 
-                # Columnas incluyendo las nuevas solicitadas por Doña Yesenia
-                columnas_destino = [
-                    "CIUDAD", "CLIENTE", "CONDUCTOR", "CÉDULA", 
-                    "A NOMBRE DE QUIEN HACE CUENTA DE COBRO", "CÉDULA DE CUENTA DE COBRO", 
-                    "NOMBRE TITULAR CUENTA BANCARIA", "CÉDULA TITULAR", "BANCO", 
-                    "NO. CUENTA", "TIPO CUENTA", "CORTE", "NÚMERO DE HORAS", 
-                    "VALOR DIA NEGOCIADO", "VALOR HORA", "TOTAL A PAGAR", "ESTADO", "ANTICIPOS", "OTROS DESCUENTOS"
-                ]
+                # ¡MAGIA PURA! Extrae automáticamente absolutamente todas las columnas que existan en BD
+                columnas_destino = [c for c in df_bd_maestra.columns if str(c).strip() != "" and "UNNAMED" not in str(c).upper()]
                 
                 col_ced_bd = obtener_nombre_columna(df_bd_maestra, ['CÉDULA', 'CEDULA', 'C.C.', 'C.C', 'CC'])
+                col_horas_bd = obtener_nombre_columna(df_bd_maestra, ['NÚMERO DE HORAS', 'NUMERO DE HORAS', 'HORAS', 'TOTAL HORAS'])
+                col_corte_bd = obtener_nombre_columna(df_bd_maestra, ['CORTE', 'PERIODO'])
+                col_total_bd = obtener_nombre_columna(df_bd_maestra, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR'])
+                col_val_hora_bd = obtener_nombre_columna(df_bd_maestra, ['VALOR HORA', 'VALOR_HORA'])
                 
                 result_rows = []
                 for _, row in grouped.iterrows():
@@ -839,8 +832,9 @@ if "Actualizador" in modo_trabajo:
                         ced_match = str(cc).replace(".0", "").strip()
                         match = df_bd_maestra[ced_bd == ced_match]
                     
-                    new_row = {col: "" for col in columnas_destino}
+                    new_row = {}
                     
+                    # Rellenado Dinámico exacto a como esté en la BD Maestra
                     for col in columnas_destino:
                         val_final = ""
                         alias_busqueda = [col]
@@ -853,7 +847,6 @@ if "Actualizador" in modo_trabajo:
                         col_raw_match = obtener_nombre_columna(df_raw, alias_busqueda)
                         if col_raw_match and pd.notna(row[col_raw_match]) and str(row[col_raw_match]).strip() != "":
                             val_final = row[col_raw_match]
-                            
                         elif not match.empty:
                             bd_row = match.iloc[0]
                             bd_col_match = obtener_nombre_columna(df_bd_maestra, alias_busqueda)
@@ -862,25 +855,23 @@ if "Actualizador" in modo_trabajo:
                                 
                         new_row[col] = val_final
                     
-                    new_row['CÉDULA'] = int(cc)
-                    new_row['NÚMERO DE HORAS'] = round(horas, 2)
-                    new_row['CORTE'] = nuevo_corte
+                    # Imposiciones Fijas Matemáticas y Fechas
+                    if col_ced_bd: new_row[col_ced_bd] = int(cc) if cc else ""
+                    if col_horas_bd: new_row[col_horas_bd] = round(horas, 2)
+                    if col_corte_bd: new_row[col_corte_bd] = nuevo_corte
                     
-                    val_hora = limpiar_dinero(new_row.get('VALOR HORA', 0))
-                    if val_hora > 0:
-                        new_row['TOTAL A PAGAR'] = round(horas * val_hora, 0)
-                    else:
-                        new_row['TOTAL A PAGAR'] = 0
+                    val_hora = 0
+                    if col_val_hora_bd:
+                        val_hora = limpiar_dinero(new_row.get(col_val_hora_bd, 0))
                         
-                    # Forzamos que los anticipos y otros descuentos arranquen vacíos (o 0) para el nuevo corte, contabilidad los llena manual
-                    new_row['ANTICIPOS'] = "$0" 
-                    new_row['OTROS DESCUENTOS'] = "$0"
+                    if col_total_bd:
+                        new_row[col_total_bd] = round(horas * val_hora, 0) if val_hora > 0 else 0
                         
                     result_rows.append(new_row)
                     
                 df_res = pd.DataFrame(result_rows)
                 
-                st.success(f"✅ ¡Cruce Exitoso! Se depuraron las horas de **{len(df_res)}** personas extrayendo la máxima información del reporte original y completando con tu base de datos (BD).")
+                st.success(f"✅ ¡Cruce Exitoso 100% Dinámico! Se extrajeron las horas y cruzaron con todas las columnas actuales de BD.")
                 
                 excel_out = io.BytesIO()
                 df_res.to_excel(excel_out, index=False, sheet_name="PAGOS PERSONAL POR SERVICIOS")
