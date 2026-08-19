@@ -562,7 +562,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
         porcentaje_ica = 0.01 if ciudad == 'CALI' else 0.0
         tasa_total_impuestos = porcentaje_retefuente + porcentaje_ica
 
-        # CORRECCIÓN BUG 1 Y REQUERIMIENTO 2: Extracción detallada de Fueras de Perímetro
+        # REQUERIMIENTO 2: Extracción detallada de Fueras de Perímetro
         fuera_perimetro_neto = 0.0
         if "MILTON" in nombre_conductor and not df_fuera.empty and nombre_conductor not in conductores_procesados_fpu:
             conductores_procesados_fpu.add(nombre_conductor)
@@ -596,7 +596,8 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
                             })
                     except: pass
 
-        total_neto_esperado += fuera_perimetro_neto
+        # CORRECCIÓN BUG 1: Inicialización correcta de la variable
+        total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
 
         ingreso_bruto_total = round(total_neto_esperado / (1 - tasa_total_impuestos))
         retefuente = round(ingreso_bruto_total * porcentaje_retefuente)
@@ -607,7 +608,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
         ingreso_base_bruta = ingreso_bruto_total - fpu_bruto_cond
         
         # El neto que le corresponde al conductor SOLO por sus horas 
-        # (Para que en la cuenta de cobro cuadre al sumar horas + viáticos)
         neto_total_conductor = ingreso_bruto_total - retefuente - ica
         neto_solo_horas = neto_total_conductor - fuera_perimetro_neto
 
@@ -702,7 +702,7 @@ if "Actualizador" in modo_trabajo:
     st.markdown("### ⏱️ Depurador y Actualizador de Horas (De Sistema a Drive)")
     st.info("Sube el archivo Excel que te arroja el sistema biométrico. El programa sumará las horas de cada persona, tomará tu base de datos **BD**, y reconstruirá una tabla depurada y exacta para que la pegues en la hoja **PAGOS PERSONAL POR SERVICIOS**.")
     
-    nuevo_corte = st.text_input("✍️ Escriba el nombre del Corte a generar (Ej: 16 AL 31 AGOSTO):")
+    nuevo_corte = st.text_input("✍️ Escriba el nombre exacto del Corte a generar (Ej: 16 AL 31 AGOSTO):")
     archivo_horas = st.file_uploader("📥 Sube el reporte de horas en formato Excel (.xlsx)", type=["xlsx", "xls"])
     
     if archivo_horas and nuevo_corte:
@@ -717,12 +717,11 @@ if "Actualizador" in modo_trabajo:
                 df_raw[col_cc] = pd.to_numeric(df_raw[col_cc], errors='coerce')
                 df_raw = df_raw.dropna(subset=[col_cc])
                 
-                # Agrupamos sumando horas (así el conductor tenga 5 registros, se vuelve 1 solo)
+                # Agrupamos por CC y sumamos horas
                 agg_dict = {col_horas: 'sum'}
                 if col_mensajero: agg_dict[col_mensajero] = 'first'
                 grouped = df_raw.groupby(col_cc, as_index=False).agg(agg_dict)
                 
-                # Columnas obligatorias exactas a las de Drive
                 columnas_destino = [
                     "CIUDAD", "CLIENTE", "CONDUCTOR", "CÉDULA", 
                     "A NOMBRE DE QUIEN HACE CUENTA DE COBRO", "CÉDULA DE CUENTA DE COBRO", 
@@ -741,7 +740,10 @@ if "Actualizador" in modo_trabajo:
                     
                     match = pd.DataFrame()
                     if col_ced_bd:
-                        match = df_pagos_completo[df_pagos_completo[col_ced_bd].astype(str).str.replace(".0","",regex=False).str.strip() == str(cc).replace(".0","",regex=False).strip()]
+                        # CORRECCIÓN BUG 2: Limpieza correcta del .0 sin usar regex (para que Python no colapse)
+                        ced_bd = df_pagos_completo[col_ced_bd].astype(str).str.replace(".0", "", regex=False).str.strip()
+                        ced_match = str(cc).replace(".0", "").strip()
+                        match = df_pagos_completo[ced_bd == ced_match]
                     
                     new_row = {col: "" for col in columnas_destino}
                     
@@ -753,7 +755,6 @@ if "Actualizador" in modo_trabajo:
                             if bd_col_match:
                                 new_row[col] = bd_row[bd_col_match]
                                 
-                        # Reemplazamos lo de esta quincena
                         new_row['NÚMERO DE HORAS'] = round(horas, 2)
                         new_row['CORTE'] = nuevo_corte
                         
@@ -791,7 +792,7 @@ if "Actualizador" in modo_trabajo:
                 
                 st.info("""
                 💡 **Instrucciones para Juliette (Para no perder formatos en Drive):**
-                1. Descarga el Excel de arriba y ábrelo.
+                1. Descarga el Excel de arriba y ábrelo en tu computador.
                 2. Selecciona todos los datos (**Ctrl + E**) y cópialos (**Ctrl + C**).
                 3. Ve a tu Google Sheets, abre la pestaña `PAGOS PERSONAL POR SERVICIOS` y limpia la info vieja.
                 4. Haz clic derecho en la celda A1 y presiona **"Pegado Especial" > "Solo Valores"**. 
@@ -804,6 +805,8 @@ if "Actualizador" in modo_trabajo:
             st.error(f"Error procesando el archivo: {e}")
 
 else:
+    if not cortes_disponibles:
+        st.stop()
     corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar:", cortes_disponibles)
     df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado]
 
@@ -821,7 +824,7 @@ else:
         
         if st.button("🔍 Calcular y Previsualizar"):
             ced_seleccionada = opcion_seleccionada.split("(C.C/NIT: ")[1].replace(")", "").strip()
-            grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular].astype(str).str.strip() == ced_seleccionada]
+            grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular].astype(str).str.replace(".0", "", regex=False).str.strip() == ced_seleccionada]
             
             calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado)
             
@@ -931,6 +934,7 @@ else:
                 
                 if len(df_banco) > 0:
                     st.markdown("### 📥 Descargas Corporativas Independientes")
+                    # REQUERIMIENTO 1 (CUMPLIDO): Se ocultó la vista previa del archivo plano de aquí abajo
                     colD1, colD2, colD3 = st.columns(3)
                     
                     colD1.download_button(
