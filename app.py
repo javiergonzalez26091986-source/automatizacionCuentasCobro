@@ -206,7 +206,7 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.cell(0, 8, f"$ {datos['neto_pagar']:,.0f}", 0, 1)
     pdf.ln(6)
     
-    # Tabla de Concepto (Ahora con valor por conductor)
+    # Tabla de Concepto Unificada (Horas y FPU)
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(25, 6, "CONCEPTO:", 0, 1)
     pdf.set_font("helvetica", "", 10)
@@ -216,18 +216,24 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.set_fill_color(227, 0, 15)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("helvetica", "B", 10)
-    pdf.cell(85, 6, "CONDUCTOR", 1, 0, 'C', fill=True)
+    pdf.cell(85, 6, "CONDUCTOR / DETALLE", 1, 0, 'C', fill=True)
     pdf.cell(35, 6, "CÉDULA", 1, 0, 'C', fill=True)
-    pdf.cell(25, 6, "HORAS", 1, 0, 'C', fill=True)
-    pdf.cell(45, 6, "VALOR A PAGAR", 1, 1, 'C', fill=True)
+    pdf.cell(25, 6, "CANTIDAD", 1, 0, 'C', fill=True)
+    pdf.cell(45, 6, "VALOR NETO", 1, 1, 'C', fill=True)
 
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("helvetica", "", 9)
     for c in datos['conductores']:
         pdf.cell(85, 6, c['nombre_conductor'][:40], 1, 0, 'L')
         pdf.cell(35, 6, c['cedula_conductor'], 1, 0, 'C')
-        pdf.cell(25, 6, f"{c['horas']:g}", 1, 0, 'C')
+        pdf.cell(25, 6, f"{c['horas']:g} Horas", 1, 0, 'C')
         pdf.cell(45, 6, f"$ {c['neto_pagar']:,.0f}", 1, 1, 'R')
+        
+    for fpu in datos.get('fpu_items', []):
+        pdf.cell(85, 6, f"F. Perímetro: {fpu['destino'][:25]}", 1, 0, 'L')
+        pdf.cell(35, 6, "N/A", 1, 0, 'C')
+        pdf.cell(25, 6, f"{fpu['cantidad']:g} Viaje(s)", 1, 0, 'C')
+        pdf.cell(45, 6, f"$ {fpu['neto']:,.0f}", 1, 1, 'R')
 
     pdf.ln(8)
     
@@ -353,12 +359,13 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
         pdf.cell(0, 6, f"$ {c['ingreso_base']:,.0f}", 1, 1, 'R')
         item_idx += 1
 
-    if datos.get('fuera_perimetro', 0) > 0:
+    for fpu in datos.get('fpu_items', []):
         pdf.cell(10, 6, str(item_idx), 1, 0, 'C')
-        pdf.cell(90, 6, "Servicios Fuera de Perímetro", 1, 0, 'L')
-        pdf.cell(20, 6, "1", 1, 0, 'C')
-        pdf.cell(35, 6, f"$ {datos['fuera_perimetro']:,.0f}", 1, 0, 'R')
-        pdf.cell(0, 6, f"$ {datos['fuera_perimetro']:,.0f}", 1, 1, 'R')
+        pdf.cell(90, 6, f"Fuera Perímetro: {fpu['destino'][:20]}", 1, 0, 'L')
+        pdf.cell(20, 6, f"{fpu['cantidad']:g}", 1, 0, 'C')
+        pdf.cell(35, 6, f"$ {fpu['valor_unitario']:,.0f}", 1, 0, 'R')
+        pdf.cell(0, 6, f"$ {fpu['total']:,.0f}", 1, 1, 'R')
+        item_idx += 1
 
     pdf.ln(2)
     pdf.set_font('helvetica', 'B', 9)
@@ -408,6 +415,7 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     border_thin = Border(left=Side(style='thin', color='BFBFBF'), right=Side(style='thin', color='BFBFBF'), top=Side(style='thin', color='BFBFBF'), bottom=Side(style='thin', color='BFBFBF'))
     center_align = Alignment(horizontal="center", vertical="center")
     right_align = Alignment(horizontal="right", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
 
     try:
         if os.path.exists('sergemLogo.png'):
@@ -464,19 +472,22 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
         ws[f'H{fila}'] = c['ingreso_base']
         for col in ['B', 'C', 'D', 'E', 'F', 'G', 'H']: ws[f'{col}{fila}'].border = border_thin
         ws[f'G{fila}'].number_format = '"$"#,##0'; ws[f'H{fila}'].number_format = '"$"#,##0'
+        ws[f'B{fila}'].alignment = center_align; ws[f'C{fila}'].alignment = left_align; ws[f'F{fila}'].alignment = center_align
         fila += 1
         item_idx += 1
 
-    if datos.get('fuera_perimetro', 0) > 0:
+    for fpu in datos.get('fpu_items', []):
         ws[f'B{fila}'] = item_idx
-        ws[f'C{fila}'] = "Servicios Fuera de Perímetro"
+        ws[f'C{fila}'] = f"Fuera Perímetro: {fpu['destino']}"
         ws.merge_cells(f'C{fila}:E{fila}')
-        ws[f'F{fila}'] = 1
-        ws[f'G{fila}'] = datos['fuera_perimetro']
-        ws[f'H{fila}'] = datos['fuera_perimetro']
+        ws[f'F{fila}'] = fpu['cantidad']
+        ws[f'G{fila}'] = fpu['valor_unitario']
+        ws[f'H{fila}'] = fpu['total']
         for col in ['B', 'C', 'D', 'E', 'F', 'G', 'H']: ws[f'{col}{fila}'].border = border_thin
         ws[f'G{fila}'].number_format = '"$"#,##0'; ws[f'H{fila}'].number_format = '"$"#,##0'
+        ws[f'B{fila}'].alignment = center_align; ws[f'C{fila}'].alignment = left_align; ws[f'F{fila}'].alignment = center_align
         fila += 1
+        item_idx += 1
         
     fila += 1
     totales = [("SUBTOTAL:", datos['ingreso_bruto_total']), ("IVA (19%):", ""), ("RETEIVA:", ""), 
@@ -520,6 +531,9 @@ def obtener_nombre_columna(df, opciones):
 
 def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
     conductores = []
+    fpu_items_doc = []
+    conductores_procesados_fpu = set()
+    
     suma_neto = 0
     suma_bruto = 0
     suma_fuera_bruto = 0
@@ -544,52 +558,69 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
         cedula_conductor = str(row.get('CÉDULA', row.get('CEDULA', ''))).strip()
         horas = obtener_horas(row)
 
-        # CORRECCIÓN BUG 1: Extracción inteligente y exacta de Fuera de Perímetro por Conductor y Corte
-        fuera_perimetro_conductor = 0.0
-        if not df_fuera.empty:
-            col_cond_f = obtener_nombre_columna(df_fuera, ['CONDUCTOR', 'CÉDULA', 'CEDULA', 'NOMBRE'])
-            col_corte_f = obtener_nombre_columna(df_fuera, ['CORTE', 'FECHA'])
-            col_val_f = obtener_nombre_columna(df_fuera, ['TOTAL', 'VALOR TOTAL', 'VALOR'])
-            
-            if col_cond_f and col_val_f:
-                mask_cond = df_fuera[col_cond_f].astype(str).str.upper().str.strip() == nombre_conductor
-                if col_corte_f:
-                    mask_corte = df_fuera[col_corte_f].astype(str).str.strip() == corte_seleccionado
-                    match_f = df_fuera[mask_cond & mask_corte]
-                else:
-                    match_f = df_fuera[mask_cond]
-                
-                fuera_perimetro_conductor = match_f[col_val_f].apply(limpiar_dinero).sum()
-
-        total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_conductor
-
         porcentaje_retefuente = 0.01
         porcentaje_ica = 0.01 if ciudad == 'CALI' else 0.0
         tasa_total_impuestos = porcentaje_retefuente + porcentaje_ica
+
+        # CORRECCIÓN BUG 1 Y REQUERIMIENTO 2: Extracción detallada de Fueras de Perímetro
+        fuera_perimetro_neto = 0.0
+        if "MILTON" in nombre_conductor and not df_fuera.empty and nombre_conductor not in conductores_procesados_fpu:
+            conductores_procesados_fpu.add(nombre_conductor)
+            
+            col_dest = obtener_nombre_columna(df_fuera, ['FUERA PERIMETRO CEDI', 'DESTINO', 'CIUDAD', 'LUGAR'])
+            col_val = obtener_nombre_columna(df_fuera, ['VALOR', 'PRECIO'])
+            col_cant = obtener_nombre_columna(df_fuera, ['CANTIDAD', 'CANT'])
+            
+            if col_dest and col_val and col_cant:
+                for _, f_row in df_fuera.iterrows():
+                    try:
+                        cant = float(f_row.get(col_cant, 0))
+                        if cant > 0:
+                            destino = str(f_row.get(col_dest, ''))
+                            valor_uni_neto = limpiar_dinero(f_row.get(col_val, 0))
+                            tot_neto = cant * valor_uni_neto
+                            
+                            # Convertimos a bruto (Base real)
+                            tot_bruto = round(tot_neto / (1 - tasa_total_impuestos))
+                            val_uni_bruto = round(valor_uni_neto / (1 - tasa_total_impuestos))
+                            
+                            fuera_perimetro_neto += tot_neto
+                            suma_fuera_bruto += tot_bruto
+                            
+                            fpu_items_doc.append({
+                                'destino': destino,
+                                'cantidad': cant,
+                                'valor_unitario': val_uni_bruto,
+                                'total': tot_bruto,
+                                'neto': tot_neto
+                            })
+                    except: pass
+
+        total_neto_esperado += fuera_perimetro_neto
 
         ingreso_bruto_total = round(total_neto_esperado / (1 - tasa_total_impuestos))
         retefuente = round(ingreso_bruto_total * porcentaje_retefuente)
         ica = round(ingreso_bruto_total * porcentaje_ica)
 
-        fuera_perimetro_bruto = round(fuera_perimetro_conductor / (1 - tasa_total_impuestos)) if fuera_perimetro_conductor > 0 else 0.0
-        ingreso_base_bruta = ingreso_bruto_total - fuera_perimetro_bruto
-        neto_a_pagar = ingreso_bruto_total - retefuente - ica
+        # Base bruta real de solo las horas laboradas (Restando la base bruta de FPU)
+        fpu_bruto_cond = round(fuera_perimetro_neto / (1 - tasa_total_impuestos)) if fuera_perimetro_neto > 0 else 0.0
+        ingreso_base_bruta = ingreso_bruto_total - fpu_bruto_cond
+        
+        # El neto que le corresponde al conductor SOLO por sus horas 
+        # (Para que en la cuenta de cobro cuadre al sumar horas + viáticos)
+        neto_total_conductor = ingreso_bruto_total - retefuente - ica
+        neto_solo_horas = neto_total_conductor - fuera_perimetro_neto
 
         conductores.append({
             'nombre_conductor': nombre_conductor,
             'cedula_conductor': cedula_conductor,
             'horas': horas,
             'ingreso_base': ingreso_base_bruta,
-            'fuera_perimetro': fuera_perimetro_bruto,
-            'ingreso_bruto_total': ingreso_bruto_total,
-            'retefuente': retefuente,
-            'ica': ica,
-            'neto_pagar': neto_a_pagar
+            'neto_pagar': neto_solo_horas
         })
 
-        suma_neto += neto_a_pagar
+        suma_neto += neto_total_conductor
         suma_bruto += ingreso_bruto_total
-        suma_fuera_bruto += fuera_perimetro_bruto
         suma_retefuente += retefuente
         suma_ica += ica
         suma_horas += horas
@@ -604,6 +635,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
         'num_cuenta': num_cuenta,
         'ciudad': ciudad_titular,
         'conductores': conductores,
+        'fpu_items': fpu_items_doc,
         'ingreso_base': suma_bruto - suma_fuera_bruto,
         'fuera_perimetro': suma_fuera_bruto,
         'ingreso_bruto_total': suma_bruto,
@@ -632,7 +664,7 @@ if st.button("🔄 Sincronizar Base de Datos", key="btn_sync", type="secondary")
 
 data_cruda = cargar_datos(GAS_URL)
 if not data_cruda:
-    st.error("Error conectando a Google Sheets. Revise la URL.")
+    st.error("Error conectando a Google Sheets. Revise la URL o los permisos del Apps Script.")
     st.stop()
 
 # Usamos la pestaña BD como base maestra de datos
@@ -640,8 +672,7 @@ df_pagos_completo = pd.DataFrame(data_cruda.get('bd', []))
 df_fuera = pd.DataFrame(data_cruda.get('fueras_perimetro', []))
 
 if df_pagos_completo.empty:
-    # Por si la base de datos se llama distinto o está vacía, buscamos pagos por defecto
-    df_pagos_completo = pd.DataFrame(data_cruda.get('pagos', []))
+    df_pagos_completo = pd.DataFrame(data_cruda.get('pagos', [])) # Fallback
     if df_pagos_completo.empty:
         st.warning("No se encontraron datos en Google Sheets.")
         st.stop()
@@ -653,107 +684,132 @@ col_titular = obtener_nombre_columna(df_pagos_completo, ['A NOMBRE DE QUIEN HACE
 col_cedula_titular = obtener_nombre_columna(df_pagos_completo, ['CÉDULA DE CUENTA DE COBRO', 'CÉDULA TITULAR', 'CEDULA_TITULAR'])
 
 if not col_titular or not col_cedula_titular:
-    st.error("No se encontraron las columnas de TITULAR o CÉDULA en el Excel.")
+    st.error("No se encontraron las columnas maestras de TITULAR o CÉDULA en tu BD.")
     st.stop()
 
 cortes_disponibles = [c for c in df_pagos_completo['CORTE'].unique() if str(c).strip() != "" and str(c).lower() != "nan"]
 
-if not cortes_disponibles:
-    st.error("La columna CORTE en Google Sheets no tiene datos válidos.")
-    st.stop()
-
 st.divider()
 modo_trabajo = st.radio("⚙️ Modo de trabajo:", 
-                        ["🗂️ Generación Masiva (Todos los titulares del corte)", 
-                         "👤 Vista Previa Individual (Revisar un titular específico)",
-                         "⏱️ Actualizador de Horas Automático (Excel Biométrico a Drive)"], horizontal=True)
+                        ["🗂️ Generación Masiva (Paquete Gerencial)", 
+                         "👤 Vista Previa Individual",
+                         "⏱️ Actualizador de Horas Automático (Excel a Drive)"], horizontal=True)
 
 # ==============================================================================
-# MODO ACTUALIZADOR DE HORAS (NUEVA SOLICITUD DE JULIETTE)
+# MODO ACTUALIZADOR DE HORAS (REQUERIMIENTO PRINCIPAL)
 # ==============================================================================
 if "Actualizador" in modo_trabajo:
-    st.markdown("### ⏱️ Actualizador Automático de Horas a Drive")
-    st.info("Sube el archivo Excel de horas (el reporte de tu sistema). El programa buscará automáticamente a cada conductor por su cédula, unificará sus horas totales y generará tu base de datos lista para copiar y pegar en tu Drive.")
+    st.markdown("### ⏱️ Depurador y Actualizador de Horas (De Sistema a Drive)")
+    st.info("Sube el archivo Excel que te arroja el sistema biométrico. El programa sumará las horas de cada persona, tomará tu base de datos **BD**, y reconstruirá una tabla depurada y exacta para que la pegues en la hoja **PAGOS PERSONAL POR SERVICIOS**.")
     
-    nuevo_corte = st.text_input("✍️ Escriba el nombre exacto del Corte a actualizar (Ej: 16 AL 31 AGOSTO):")
-    archivo_horas = st.file_uploader("📥 Sube el reporte de horas en formato Excel (.xlsx)", type=["xlsx"])
+    nuevo_corte = st.text_input("✍️ Escriba el nombre del Corte a generar (Ej: 16 AL 31 AGOSTO):")
+    archivo_horas = st.file_uploader("📥 Sube el reporte de horas en formato Excel (.xlsx)", type=["xlsx", "xls"])
     
     if archivo_horas and nuevo_corte:
         try:
-            df_horas = pd.read_excel(archivo_horas)
+            df_raw = pd.read_excel(archivo_horas)
             
-            if 'CC' in df_horas.columns and 'TOTAL_HORAS' in df_horas.columns:
-                # Agrupamos por CC y sumamos para conductores que tengan múltiples registros
-                df_horas['CC'] = df_horas['CC'].astype(str).str.strip().str.replace(".0", "", regex=False)
-                horas_agrupadas = df_horas.groupby('CC')['TOTAL_HORAS'].sum().reset_index()
-                diccionario_horas = dict(zip(horas_agrupadas['CC'], horas_agrupadas['TOTAL_HORAS']))
+            col_cc = obtener_nombre_columna(df_raw, ['CC', 'CEDULA', 'CÉDULA'])
+            col_horas = obtener_nombre_columna(df_raw, ['TOTAL_HORAS', 'TOTAL HORAS', 'HORAS'])
+            col_mensajero = obtener_nombre_columna(df_raw, ['MENSAJERO', 'CONDUCTOR', 'NOMBRE'])
+            
+            if col_cc and col_horas:
+                df_raw[col_cc] = pd.to_numeric(df_raw[col_cc], errors='coerce')
+                df_raw = df_raw.dropna(subset=[col_cc])
                 
-                # Copiar toda la base de datos de Google Sheets (La pestaña BD)
-                df_actualizado = df_pagos_completo.copy()
+                # Agrupamos sumando horas (así el conductor tenga 5 registros, se vuelve 1 solo)
+                agg_dict = {col_horas: 'sum'}
+                if col_mensajero: agg_dict[col_mensajero] = 'first'
+                grouped = df_raw.groupby(col_cc, as_index=False).agg(agg_dict)
                 
-                col_cedula_conduc = obtener_nombre_columna(df_actualizado, ['CÉDULA', 'CEDULA', 'C.C.', 'C.C'])
-                col_horas_conduc = obtener_nombre_columna(df_actualizado, ['NÚMERO DE HORAS', 'NUMERO DE HORAS', 'HORAS', 'CANTIDAD DE HORAS'])
-                col_valor_hora = obtener_nombre_columna(df_actualizado, ['VALOR HORA', 'VALOR_HORA', 'VALOR'])
-                col_total_pagar = obtener_nombre_columna(df_actualizado, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR'])
-                col_corte_sheets = obtener_nombre_columna(df_actualizado, ['CORTE'])
+                # Columnas obligatorias exactas a las de Drive
+                columnas_destino = [
+                    "CIUDAD", "CLIENTE", "CONDUCTOR", "CÉDULA", 
+                    "A NOMBRE DE QUIEN HACE CUENTA DE COBRO", "CÉDULA DE CUENTA DE COBRO", 
+                    "NOMBRE TITULAR CUENTA BANCARIA", "CÉDULA TITULAR", "BANCO", 
+                    "NO. CUENTA", "TIPO CUENTA", "CORTE", "NÚMERO DE HORAS", 
+                    "VALOR DIA NEGOCIADO", "VALOR HORA", "TOTAL A PAGAR", "ESTADO"
+                ]
                 
-                if col_cedula_conduc and col_horas_conduc:
-                    cambios = 0
+                col_ced_bd = obtener_nombre_columna(df_pagos_completo, ['CÉDULA', 'CEDULA', 'C.C.', 'C.C', 'CC'])
+                col_vh_bd = obtener_nombre_columna(df_pagos_completo, ['VALOR HORA', 'VALOR_HORA'])
+                
+                result_rows = []
+                for _, row in grouped.iterrows():
+                    cc = row[col_cc]
+                    horas = row[col_horas]
                     
-                    # Actualizamos a todo el mundo que esté en el corte especificado
-                    for idx, row in df_actualizado.iterrows():
-                        if str(row.get(col_corte_sheets, '')).strip() == nuevo_corte.strip():
-                            cedula = str(row[col_cedula_conduc]).strip().replace(".0", "")
+                    match = pd.DataFrame()
+                    if col_ced_bd:
+                        match = df_pagos_completo[df_pagos_completo[col_ced_bd].astype(str).str.replace(".0","",regex=False).str.strip() == str(cc).replace(".0","",regex=False).strip()]
+                    
+                    new_row = {col: "" for col in columnas_destino}
+                    
+                    if not match.empty:
+                        bd_row = match.iloc[0]
+                        # Cruce inteligente: Copiamos todo lo de la BD
+                        for col in columnas_destino:
+                            bd_col_match = obtener_nombre_columna(df_pagos_completo, [col])
+                            if bd_col_match:
+                                new_row[col] = bd_row[bd_col_match]
+                                
+                        # Reemplazamos lo de esta quincena
+                        new_row['NÚMERO DE HORAS'] = round(horas, 2)
+                        new_row['CORTE'] = nuevo_corte
+                        
+                        try:
+                            vh = limpiar_dinero(bd_row.get(col_vh_bd, 0))
+                            new_row['TOTAL A PAGAR'] = round(horas * vh, 0)
+                        except:
+                            new_row['TOTAL A PAGAR'] = 0
                             
-                            # Si está en el reporte biométrico
-                            if cedula in diccionario_horas:
-                                nuevas_horas = round(diccionario_horas[cedula], 2)
-                                df_actualizado.at[idx, col_horas_conduc] = nuevas_horas
-                                
-                                try:
-                                    valor_hora = limpiar_dinero(row.get(col_valor_hora, 0))
-                                    df_actualizado.at[idx, col_total_pagar] = nuevas_horas * valor_hora
-                                except: pass
-                                
-                                cambios += 1
-                            else:
-                                # Si no está en el reporte, se deja en 0
-                                df_actualizado.at[idx, col_horas_conduc] = 0
-                                df_actualizado.at[idx, col_total_pagar] = 0
-                                
-                    st.success(f"✅ ¡Cruce Exitoso! Se detectaron y actualizaron las horas de **{cambios}** conductores para el corte **{nuevo_corte}**.")
+                    else:
+                        # Si es alguien nuevo que no está en la BD
+                        new_row['CÉDULA'] = int(cc)
+                        if col_mensajero: new_row['CONDUCTOR'] = row[col_mensajero]
+                        new_row['NÚMERO DE HORAS'] = round(horas, 2)
+                        new_row['CORTE'] = nuevo_corte
+                        
+                    result_rows.append(new_row)
                     
-                    # Generar Archivo Excel Exacto para Pegar en Drive
-                    excel_out = io.BytesIO()
-                    df_actualizado.to_excel(excel_out, index=False, sheet_name="PAGOS PERSONAL POR SERVICIOS")
-                    excel_out.seek(0)
-                    
-                    st.download_button(
-                        label="📥 DESCARGAR BASE DE DATOS ACTUALIZADA (PARA GOOGLE SHEETS)",
-                        data=excel_out,
-                        file_name=f"Base_Actualizada_SERGEM_{nuevo_corte.replace(' ', '_').replace('/', '-')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        type="primary",
-                        use_container_width=True
-                    )
-                    
-                    st.info("""
-                    💡 **Instrucciones de Pegado (Para no perder formatos):**
-                    1. Descarga el archivo de arriba y ábrelo en tu computador.
-                    2. Presiona **Ctrl + E** (para seleccionar toda la tabla) y **Ctrl + C** (Copiar).
-                    3. Ve a tu Google Sheets, a la pestaña `PAGOS PERSONAL POR SERVICIOS`.
-                    4. Clic derecho en la primera celda (**A1**) y selecciona **"Pegado Especial" > "Solo Valores"**.
-                    """)
-                else:
-                    st.error("No se encontraron las columnas 'CÉDULA' o 'NÚMERO DE HORAS' en la base de datos de Drive.")
+                df_res = pd.DataFrame(result_rows)
+                
+                st.success(f"✅ ¡Cruce Exitoso! Se depuraron las horas de **{len(df_res)}** personas y se cruzaron con tu BD.")
+                
+                excel_out = io.BytesIO()
+                df_res.to_excel(excel_out, index=False, sheet_name="PAGOS PERSONAL POR SERVICIOS")
+                excel_out.seek(0)
+                
+                st.download_button(
+                    label="📥 DESCARGAR BASE DEPURADA (EXCEL PARA DRIVE)",
+                    data=excel_out,
+                    file_name=f"Base_Depurada_SERGEM_{nuevo_corte.replace(' ', '_').replace('/', '-')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True
+                )
+                
+                st.info("""
+                💡 **Instrucciones para Juliette (Para no perder formatos en Drive):**
+                1. Descarga el Excel de arriba y ábrelo.
+                2. Selecciona todos los datos (**Ctrl + E**) y cópialos (**Ctrl + C**).
+                3. Ve a tu Google Sheets, abre la pestaña `PAGOS PERSONAL POR SERVICIOS` y limpia la info vieja.
+                4. Haz clic derecho en la celda A1 y presiona **"Pegado Especial" > "Solo Valores"**. 
+                *(De esta forma el drive mantiene sus colores y bordes intactos).*
+                """)
+                
             else:
-                st.error("El archivo subido no tiene el formato correcto. Faltan las columnas 'CC' o 'TOTAL_HORAS'.")
+                st.error("El archivo subido no tiene la estructura del sistema. Faltan las columnas 'CC' o 'TOTAL_HORAS'.")
         except Exception as e:
             st.error(f"Error procesando el archivo: {e}")
 
 else:
     corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar:", cortes_disponibles)
     df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado]
+
+    # Info especial para Fueras de Perímetro
+    if df_pagos_corte['CONDUCTOR'].str.contains('MILTON', na=False).any():
+        st.info("💡 **Aviso Importante:** Se detectó a Milton Javier Cortes. Asegúrate de tener una columna llamada **CANTIDAD** en tu pestaña *FUERAS PERIMETRO /ADIC* indicando cuántos viajes hizo a cada destino para que salgan desglosados en su cuenta.")
 
     # ==============================================================================
     # MODO INDIVIDUAL
@@ -780,7 +836,7 @@ else:
                 cD.markdown(f"<div class='metric-box' style='background-color:#E3000F; color:white;'><b>NETO EXACTO</b><br>${calculos['neto_pagar']:,.0f}</div>", unsafe_allow_html=True)
                 
                 if calculos['fuera_perimetro'] > 0:
-                    st.success(f"🚚 **¡Valor detectado!** Se sumaron **${calculos['fuera_perimetro']:,.0f}** adicionales correspondientes a Salidas Fuera de Perímetro.")
+                    st.success(f"🚚 **¡Valor detectado!** Se sumaron **${calculos['fuera_perimetro']:,.0f}** adicionales detallados correspondientes a Salidas Fuera de Perímetro.")
 
             datos_doc = calculos.copy()
             datos_doc.update({'id': "PREVIEW", 'fecha_emision': obtener_fecha_actual(), 'corte_fechas': corte_seleccionado})
@@ -799,11 +855,11 @@ else:
             colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq_bytes, file_name=f"DocEq_{ced_seleccionada}.pdf", mime="application/pdf", use_container_width=True)
 
     # ==============================================================================
-    # MODO MASIVO (LOTE)
+    # MODO MASIVO (LOTE) - DESCARGAS INDEPENDIENTES
     # ==============================================================================
     elif "Masiva" in modo_trabajo:
-        if st.button("🚀 Procesar Lote y Generar Paquete", use_container_width=True, type="primary"):
-            mensaje_carga = st.info(f"📥 Procesando la información y unificando archivos...")
+        if st.button("🚀 Procesar Lote General", use_container_width=True, type="primary"):
+            mensaje_carga = st.info(f"📥 Procesando la información y unificando archivos de toda la quincena...")
             
             try:
                 pagos_procesados_banco = []
@@ -871,15 +927,14 @@ else:
                 texto_banco = generar_txt_banco(df_banco)
                 
                 mensaje_carga.empty() 
-                st.success(f"✅ ¡Éxito! Archivos listos para imprimir. {len(df_banco)} titulares procesados. ({ignorados} omitidos por saldo $0).")
+                st.success(f"✅ ¡Éxito! {len(df_banco)} titulares procesados. ({ignorados} omitidos por saldo $0).")
                 
                 if len(df_banco) > 0:
-                    st.markdown("### 📥 Descargas Corporativas")
-                    # BOTONES SEPARADOS SEGÚN REQUERIMIENTO 3
+                    st.markdown("### 📥 Descargas Corporativas Independientes")
                     colD1, colD2, colD3 = st.columns(3)
                     
                     colD1.download_button(
-                        label="1️⃣ Descargar Cuentas de Cobro (.ZIP)",
+                        label="1️⃣ Cuentas de Cobro (.ZIP)",
                         data=zip_cuentas_io,
                         file_name=f"Cuentas_Cobro_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip",
                         mime="application/zip",
@@ -887,7 +942,7 @@ else:
                     )
                     
                     colD2.download_button(
-                        label="2️⃣ Descargar Docs. Equivalentes (.ZIP)",
+                        label="2️⃣ Docs. Equivalentes (.ZIP)",
                         data=zip_eq_io,
                         file_name=f"Docs_Equivalentes_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip",
                         mime="application/zip",
@@ -895,16 +950,12 @@ else:
                     )
                     
                     colD3.download_button(
-                        label="3️⃣ Descargar Archivo Plano Banco (.TXT)",
+                        label="3️⃣ Archivo Plano Banco (.TXT)",
                         data=texto_banco,
                         file_name=f"Plano_Banco_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.txt",
                         mime="text/plain",
                         use_container_width=True
                     )
-                    
-                    st.divider()
-                    st.subheader("Vista Previa - Datos del Banco")
-                    st.text_area("Previsualización Archivo Plano (.txt)", texto_banco, height=250)
 
             except Exception as e:
                 mensaje_carga.empty()
