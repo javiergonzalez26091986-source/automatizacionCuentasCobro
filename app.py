@@ -179,9 +179,9 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     
     pdf.cell(0, 6, "DEBE A:", 0, 1, 'C')
     pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 6, str(datos['nombre_titular']).upper(), 0, 1, 'C')
+    pdf.cell(0, 6, str(datos['nombre_prestador']).upper(), 0, 1, 'C')
     pdf.set_font("helvetica", "", 11)
-    pdf.cell(0, 6, f"C.C / NIT {datos['cedula_titular']}", 0, 1, 'C')
+    pdf.cell(0, 6, f"C.C / NIT {datos['cedula_prestador']}", 0, 1, 'C')
     pdf.ln(8)
 
     pdf.set_font("helvetica", "B", 11)
@@ -252,16 +252,17 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(0, 6, f"CUENTA # {datos['num_cuenta']} - {datos['tipo_cuenta'].upper()}", 0, 1)
     pdf.cell(0, 6, f"BANCO: {datos['banco'].upper()}", 0, 1)
-    pdf.cell(0, 6, f"TITULAR: {datos['nombre_titular']} (C.C/NIT: {datos['cedula_titular']})", 0, 1)
+    # Aquí se mantiene la información del dueño real de la cuenta de banco
+    pdf.cell(0, 6, f"TITULAR: {datos['nombre_titular_banco']} (C.C/NIT: {datos['cedula_titular_banco']})", 0, 1)
     pdf.ln(15)
     
     pdf.set_font("helvetica", "", 11)
     pdf.cell(0, 6, "Atentamente,", 0, 1)
     pdf.ln(10)
     pdf.set_font("helvetica", "B", 11)
-    pdf.cell(80, 5, str(datos['nombre_titular']).upper(), "T", 1, "L")
+    pdf.cell(80, 5, str(datos['nombre_prestador']).upper(), "T", 1, "L")
     pdf.set_font("helvetica", "", 11)
-    pdf.cell(80, 5, f"C.C / NIT {datos['cedula_titular']}", 0, 1, "L")
+    pdf.cell(80, 5, f"C.C / NIT {datos['cedula_prestador']}", 0, 1, "L")
 
 def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.add_page()
@@ -328,11 +329,11 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.set_font('helvetica', 'B', 9)
     pdf.cell(25, 6, "Nombre:", 1)
     pdf.set_font('helvetica', '', 9)
-    pdf.cell(100, 6, datos['nombre_titular'][:45], 1)
+    pdf.cell(100, 6, datos['nombre_prestador'][:45], 1)
     pdf.set_font('helvetica', 'B', 9)
     pdf.cell(20, 6, "C.C / NIT:", 1)
     pdf.set_font('helvetica', '', 9)
-    pdf.cell(0, 6, datos['cedula_titular'], 1, 1)
+    pdf.cell(0, 6, datos['cedula_prestador'], 1, 1)
     
     pdf.set_font('helvetica', 'B', 9)
     pdf.cell(25, 6, "Ciudad:", 1)
@@ -413,8 +414,8 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.set_font('helvetica', 'B', 9)
     pdf.cell(80, 5, "________________________________________________", 0, 1)
     pdf.cell(80, 5, "FIRMA PRESTADOR DEL SERVICIO", 0, 1)
-    pdf.cell(80, 5, f"C.C. / NIT: {datos['cedula_titular']}", 0, 1)
-    pdf.cell(80, 5, f"NOMBRE: {datos['nombre_titular']}", 0, 1)
+    pdf.cell(80, 5, f"C.C. / NIT: {datos['cedula_prestador']}", 0, 1)
+    pdf.cell(80, 5, f"NOMBRE: {datos['nombre_prestador']}", 0, 1)
 
 def construir_hoja_documento_equivalente_excel(ws, datos):
     header_font = Font(bold=True, color="FFFFFF")
@@ -455,8 +456,8 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws['B13'] = " DATOS DEL BENEFICIARIO / PROVEEDOR (VENDEDOR)"
     ws['B13'].font = header_font; ws['B13'].fill = dark_fill; ws.merge_cells('B13:H13')
 
-    ws['B14'] = "Nombre:"; ws['B14'].font = bold_font; ws['C14'] = datos['nombre_titular']; ws.merge_cells('C14:E14')
-    ws['G14'] = "C.C / NIT:"; ws['G14'].font = bold_font; ws['H14'] = datos['cedula_titular']
+    ws['B14'] = "Nombre:"; ws['B14'].font = bold_font; ws['C14'] = datos['nombre_prestador']; ws.merge_cells('C14:E14')
+    ws['G14'] = "C.C / NIT:"; ws['G14'].font = bold_font; ws['H14'] = datos['cedula_prestador']
     
     ws['G16'] = "Conductores:"; ws['G16'].font = bold_font
     nombres_conds = ", ".join([c['nombre_conductor'] for c in datos['conductores']])
@@ -517,8 +518,8 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws[f'B{fila_firma}'] = "________________________________________________"
     ws[f'B{fila_firma+1}'] = "FIRMA PRESTADOR DEL SERVICIO"
     ws[f'B{fila_firma+1}'].font = bold_font
-    ws[f'B{fila_firma+2}'] = f"C.C. / NIT: {datos['cedula_titular']}"
-    ws[f'B{fila_firma+3}'] = f"NOMBRE: {datos['nombre_titular']}"
+    ws[f'B{fila_firma+2}'] = f"C.C. / NIT: {datos['cedula_prestador']}"
+    ws[f'B{fila_firma+3}'] = f"NOMBRE: {datos['nombre_prestador']}"
 
     ws.column_dimensions['B'].width = 16; ws.column_dimensions['C'].width = 12; ws.column_dimensions['D'].width = 12
     ws.column_dimensions['E'].width = 12; ws.column_dimensions['F'].width = 10; ws.column_dimensions['G'].width = 22; ws.column_dimensions['H'].width = 22
@@ -538,7 +539,7 @@ def obtener_nombre_columna(df, opciones):
                 return col
     return None
 
-def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_titular, col_cedula_titular):
+def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prestador, col_ced_prestador, col_tit_banco, col_ced_banco):
     conductores = []
     fpu_items_doc = []
     conductores_procesados_fpu = set()
@@ -550,10 +551,16 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_titul
     suma_ica = 0
     suma_horas = 0
 
+    # Usamos la primera fila del grupo para extraer todos los datos personales
     row_titular = grupo_df.iloc[0]
     
-    nombre_titular = str(row_titular.get(col_titular, 'S/N')).strip()
-    cedula_titular = str(row_titular.get(col_cedula_titular, '')).strip()
+    # 1. Datos del Prestador (A quien va dirigida la cuenta de cobro y documentos equivalentes)
+    nombre_prestador = str(row_titular.get(col_prestador, 'S/N')).strip()
+    cedula_prestador = str(row_titular.get(col_ced_prestador, '')).strip()
+    
+    # 2. Datos Bancarios (A quien se le consigna realmente el dinero unificado)
+    nombre_titular_banco = str(row_titular.get(col_tit_banco, nombre_prestador)).strip()
+    cedula_titular_banco = str(row_titular.get(col_ced_banco, cedula_prestador)).strip()
     
     banco = str(row_titular.get('BANCO', '')).strip()
     tipo_cuenta = str(row_titular.get('TIPO CUENTA', '')).strip()
@@ -633,9 +640,12 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_titul
 
     if not conductores: return None
 
+    # Retornamos el diccionario alimentado con los dos actores separados
     return {
-        'nombre_titular': nombre_titular,
-        'cedula_titular': cedula_titular,
+        'nombre_prestador': nombre_prestador,
+        'cedula_prestador': cedula_prestador,
+        'nombre_titular_banco': nombre_titular_banco,
+        'cedula_titular_banco': cedula_titular_banco,
         'banco': banco,
         'tipo_cuenta': tipo_cuenta,
         'num_cuenta': num_cuenta,
@@ -694,12 +704,17 @@ df_pagos_completo.columns = df_pagos_completo.columns.str.strip().str.upper()
 if not df_bd_maestra.empty: df_bd_maestra.columns = df_bd_maestra.columns.str.strip().str.upper()
 if not df_fuera.empty: df_fuera.columns = df_fuera.columns.str.strip().str.upper()
 
-# Buscamos columnas maestras SÓLO en la base operativa (pagos)
-col_titular = obtener_nombre_columna(df_pagos_completo, ['NOMBRE TITULAR CUENTA BANCARIA', 'A NOMBRE DE QUIEN HACE CUENTA DE COBRO', 'NOMBRE_TITULAR'])
-col_cedula_titular = obtener_nombre_columna(df_pagos_completo, ['CÉDULA TITULAR', 'CÉDULA DE CUENTA DE COBRO', 'CEDULA_TITULAR'])
+# Buscamos columnas de AMBOS actores en la base operativa (pagos)
+# Actor 1: Quien cobra (Para los nombres de los documentos)
+col_prestador = obtener_nombre_columna(df_pagos_completo, ['A NOMBRE DE QUIEN HACE CUENTA DE COBRO', 'NOMBRE PRESTADOR', 'A NOMBRE DE QUIEN HACE CUENTA'])
+col_cedula_prestador = obtener_nombre_columna(df_pagos_completo, ['CÉDULA DE CUENTA DE COBRO', 'CEDULA DE CUENTA DE COBRO'])
 
-if not col_titular or not col_cedula_titular:
-    st.error("No se encontraron las columnas maestras de TITULAR o CÉDULA en la pestaña PAGOS PERSONAL POR SERVICIOS.")
+# Actor 2: A quien se consigna (Para archivo del banco y agrupación matemática)
+col_titular_banco = obtener_nombre_columna(df_pagos_completo, ['NOMBRE TITULAR CUENTA BANCARIA', 'NOMBRE_TITULAR'])
+col_cedula_banco = obtener_nombre_columna(df_pagos_completo, ['CÉDULA TITULAR', 'CEDULA TITULAR'])
+
+if not col_prestador or not col_titular_banco:
+    st.error("Faltan las columnas que diferencian a quien cobra (A NOMBRE DE QUIEN HACE CUENTA...) del titular del banco (NOMBRE TITULAR CUENTA...). Verifique sus nombres en el Sheets.")
     st.stop()
 
 # El dropdown de Cortes se alimenta SÓLO de la base operativa (pagos)
@@ -843,20 +858,29 @@ else:
     # MODO INDIVIDUAL
     # ------------------------------------------------------------------------------
     if "Individual" in modo_trabajo:
-        titulares_unicos = df_pagos_corte[[col_cedula_titular, col_titular]].dropna().drop_duplicates()
-        lista_opciones = [f"{row[col_titular]} (C.C/NIT: {row[col_cedula_titular]})" for _, row in titulares_unicos.iterrows()]
-        opcion_seleccionada = st.selectbox("Busque o seleccione el titular de la cuenta:", sorted(lista_opciones))
+        # Agrupamos por la cuenta de banco para evitar duplicados, pero mostramos el nombre del Prestador
+        titulares_unicos = df_pagos_corte[[col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco]].dropna().drop_duplicates(subset=[col_cedula_banco])
+        
+        lista_opciones = []
+        for _, row in titulares_unicos.iterrows():
+            lbl = f"{row[col_prestador]} (C.C: {row[col_cedula_prestador]}) 🏦 Pago a cuenta de CC: {row[col_cedula_banco]}"
+            lista_opciones.append(lbl)
+            
+        opcion_seleccionada = st.selectbox("Busque o seleccione el prestador (titular de la cuenta de cobro):", sorted(lista_opciones))
         
         if st.button("🔍 Calcular y Previsualizar"):
-            ced_seleccionada = opcion_seleccionada.split("(C.C/NIT: ")[1].replace(")", "").strip()
-            grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular].astype(str).str.replace(".0", "", regex=False).str.strip() == ced_seleccionada]
+            # Extraemos limpiamente la cédula del banco para poder agrupar toda su plata
+            ced_banco_seleccionada = opcion_seleccionada.split("CC: ")[1].strip()
             
-            calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_titular, col_cedula_titular)
+            # Filtramos en la base usando SÓLO la cédula del banco
+            grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_banco].astype(str).str.replace(".0", "", regex=False).str.strip() == ced_banco_seleccionada]
+            
+            calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco)
             
             if not calculos:
                 st.warning("Este titular tiene saldo neto en $0 para este corte.")
             else:
-                st.markdown(f"### Resumen Financiero: {calculos['nombre_titular']} (Conductores unificados: {len(calculos['conductores'])})")
+                st.markdown(f"### Resumen Financiero: {calculos['nombre_prestador']} (Conductores unificados: {len(calculos['conductores'])})")
                 cA, cB, cC, cD = st.columns(4)
                 cA.markdown(f"<div class='metric-box'><b>BASE BRUTA</b><br>${calculos['ingreso_base']:,.0f}</div>", unsafe_allow_html=True)
                 cB.markdown(f"<div class='metric-box'><b>RETEFUENTE (1%)</b><br>${calculos['retefuente']:,.0f}</div>", unsafe_allow_html=True)
@@ -879,8 +903,8 @@ else:
             pdf_eq_bytes = out_eq.encode('latin-1') if isinstance(out_eq, str) else bytes(out_eq)
             
             colBtn1, colBtn2 = st.columns(2)
-            colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=pdf_ct_bytes, file_name=f"Cuenta_{ced_seleccionada}.pdf", mime="application/pdf", use_container_width=True)
-            colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq_bytes, file_name=f"DocEq_{ced_seleccionada}.pdf", mime="application/pdf", use_container_width=True)
+            colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=pdf_ct_bytes, file_name=f"Cuenta_{calculos['cedula_prestador']}.pdf", mime="application/pdf", use_container_width=True)
+            colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq_bytes, file_name=f"DocEq_{calculos['cedula_prestador']}.pdf", mime="application/pdf", use_container_width=True)
 
     # ------------------------------------------------------------------------------
     # MODO MASIVO (LOTE)
@@ -900,12 +924,14 @@ else:
                 wb_maestro_equivalentes.remove(wb_maestro_equivalentes.active)
                 
                 contador = 1
-                cedulas_unicas = df_pagos_corte[col_cedula_titular].dropna().unique()
                 
-                for cedula in cedulas_unicas:
-                    grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular] == cedula]
+                # SÚPER CLAVE: Agrupamos todo masivamente usando el número de cuenta de banco para unificar la plata
+                cedulas_banco_unicas = df_pagos_corte[col_cedula_banco].dropna().unique()
+                
+                for ced_banco in cedulas_banco_unicas:
+                    grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_banco] == ced_banco]
                     
-                    calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_titular, col_cedula_titular)
+                    calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco)
                     
                     if not calculos:
                         ignorados += 1
@@ -917,13 +943,15 @@ else:
                     agregar_pagina_pdf_cuenta_cobro(pdf_maestro_cuentas, datos_doc)
                     agregar_pagina_pdf_doc_equivalente(pdf_maestro_equivalentes, datos_doc)
 
-                    nombre_pestana = f"{contador}_{datos_doc['nombre_titular'][:20]}".replace(":", "").replace("/", "-")
+                    # La pestaña de Excel llevará el nombre del prestador, no del dueño del banco
+                    nombre_pestana = f"{contador}_{datos_doc['nombre_prestador'][:20]}".replace(":", "").replace("/", "-")
                     ws_nuevo = wb_maestro_equivalentes.create_sheet(title=nombre_pestana)
                     construir_hoja_documento_equivalente_excel(ws_nuevo, datos_doc)
 
+                    # Archivo Plano Banco (Usando EXCLUSIVAMENTE los datos del dueño de la cuenta)
                     pagos_procesados_banco.append({
-                        'NIT_BENEFICIARIO': datos_doc['cedula_titular'],
-                        'NOMBRE_BENEFICIARIO': datos_doc['nombre_titular'],
+                        'NIT_BENEFICIARIO': datos_doc['cedula_titular_banco'],
+                        'NOMBRE_BENEFICIARIO': datos_doc['nombre_titular_banco'],
                         'BANCO_DESTINO': datos_doc['banco'],
                         'TIPO_CUENTA': datos_doc['tipo_cuenta'],
                         'NUMERO_CUENTA': datos_doc['num_cuenta'],
@@ -953,7 +981,7 @@ else:
                 texto_banco = generar_txt_banco(df_banco)
                 
                 mensaje_carga.empty() 
-                st.success(f"✅ ¡Éxito! {len(df_banco)} titulares procesados. ({ignorados} omitidos por saldo $0).")
+                st.success(f"✅ ¡Éxito! {len(df_banco)} titulares procesados y agrupados. ({ignorados} omitidos por saldo $0).")
                 
                 if len(df_banco) > 0:
                     st.markdown("### 📥 Descargas Corporativas Independientes")
