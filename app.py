@@ -552,10 +552,8 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_titul
 
     row_titular = grupo_df.iloc[0]
     
-    # === AQUÍ ESTÁ LA CORRECCIÓN: Toma 100% de la G y la H ===
     nombre_titular = str(row_titular.get(col_titular, 'S/N')).strip()
     cedula_titular = str(row_titular.get(col_cedula_titular, '')).strip()
-    # =========================================================
     
     banco = str(row_titular.get('BANCO', '')).strip()
     tipo_cuenta = str(row_titular.get('TIPO CUENTA', '')).strip()
@@ -675,27 +673,36 @@ if not data_cruda:
     st.error("Error conectando a Google Sheets. Revise la URL o los permisos del Apps Script.")
     st.stop()
 
-# Usamos la pestaña BD como base maestra de datos
-df_pagos_completo = pd.DataFrame(data_cruda.get('bd', []))
+# ==============================================================================
+# SEPARACIÓN ESTRICTA DE BASES DE DATOS
+# ==============================================================================
+# 1. Base Operativa (Quincena actual para los PDFs y Banco)
+df_pagos_completo = pd.DataFrame(data_cruda.get('pagos', []))
+
+# 2. Base de Datos Histórica (Únicamente para cruzar información en el Actualizador)
+df_bd_maestra = pd.DataFrame(data_cruda.get('bd', []))
+
+# 3. Base de Fueras de Perímetro
 df_fuera = pd.DataFrame(data_cruda.get('fueras_perimetro', []))
 
 if df_pagos_completo.empty:
-    df_pagos_completo = pd.DataFrame(data_cruda.get('pagos', [])) # Fallback
-    if df_pagos_completo.empty:
-        st.warning("No se encontraron datos en Google Sheets.")
-        st.stop()
+    st.warning("No se encontraron datos en la pestaña PAGOS PERSONAL POR SERVICIOS.")
+    st.stop()
 
+# Estandarizamos los nombres de las columnas
 df_pagos_completo.columns = df_pagos_completo.columns.str.strip().str.upper()
+if not df_bd_maestra.empty: df_bd_maestra.columns = df_bd_maestra.columns.str.strip().str.upper()
 if not df_fuera.empty: df_fuera.columns = df_fuera.columns.str.strip().str.upper()
 
-# === AQUÍ FORZAMOS A QUE LEA ESTRICTAMENTE DE LAS COLUMNAS G y H ===
+# Buscamos columnas maestras SÓLO en la base operativa (pagos)
 col_titular = obtener_nombre_columna(df_pagos_completo, ['NOMBRE TITULAR CUENTA BANCARIA', 'A NOMBRE DE QUIEN HACE CUENTA DE COBRO', 'NOMBRE_TITULAR'])
 col_cedula_titular = obtener_nombre_columna(df_pagos_completo, ['CÉDULA TITULAR', 'CÉDULA DE CUENTA DE COBRO', 'CEDULA_TITULAR'])
 
 if not col_titular or not col_cedula_titular:
-    st.error("No se encontraron las columnas maestras de TITULAR o CÉDULA en tu BD.")
+    st.error("No se encontraron las columnas maestras de TITULAR o CÉDULA en la pestaña PAGOS PERSONAL POR SERVICIOS.")
     st.stop()
 
+# El dropdown de Cortes se alimenta SÓLO de la base operativa (pagos)
 cortes_disponibles = [c for c in df_pagos_completo['CORTE'].unique() if str(c).strip() != "" and str(c).lower() != "nan"]
 
 st.divider()
@@ -730,7 +737,6 @@ if "Actualizador" in modo_trabajo:
                 agg_dict[col_horas] = 'sum'
                 grouped = df_raw.groupby(col_cc, as_index=False).agg(agg_dict)
                 
-                # Estructura obligatoria a replicar para Google Sheets
                 columnas_destino = [
                     "CIUDAD", "CLIENTE", "CONDUCTOR", "CÉDULA", 
                     "A NOMBRE DE QUIEN HACE CUENTA DE COBRO", "CÉDULA DE CUENTA DE COBRO", 
@@ -739,7 +745,8 @@ if "Actualizador" in modo_trabajo:
                     "VALOR DIA NEGOCIADO", "VALOR HORA", "TOTAL A PAGAR", "ESTADO"
                 ]
                 
-                col_ced_bd = obtener_nombre_columna(df_pagos_completo, ['CÉDULA', 'CEDULA', 'C.C.', 'C.C', 'CC'])
+                # Para el actualizador, usamos df_bd_maestra
+                col_ced_bd = obtener_nombre_columna(df_bd_maestra, ['CÉDULA', 'CEDULA', 'C.C.', 'C.C', 'CC'])
                 
                 result_rows = []
                 for _, row in grouped.iterrows():
@@ -748,13 +755,12 @@ if "Actualizador" in modo_trabajo:
                     
                     match = pd.DataFrame()
                     if col_ced_bd:
-                        ced_bd = df_pagos_completo[col_ced_bd].astype(str).str.replace(".0", "", regex=False).str.strip()
+                        ced_bd = df_bd_maestra[col_ced_bd].astype(str).str.replace(".0", "", regex=False).str.strip()
                         ced_match = str(cc).replace(".0", "").strip()
-                        match = df_pagos_completo[ced_bd == ced_match]
+                        match = df_bd_maestra[ced_bd == ced_match]
                     
                     new_row = {col: "" for col in columnas_destino}
                     
-                    # Rellenado Inteligente Columna por Columna
                     for col in columnas_destino:
                         val_final = ""
                         alias_busqueda = [col]
@@ -771,18 +777,16 @@ if "Actualizador" in modo_trabajo:
                         # PRIORIDAD 2: Si no está en el crudo, buscar en la BD Maestra
                         elif not match.empty:
                             bd_row = match.iloc[0]
-                            bd_col_match = obtener_nombre_columna(df_pagos_completo, alias_busqueda)
+                            bd_col_match = obtener_nombre_columna(df_bd_maestra, alias_busqueda)
                             if bd_col_match and pd.notna(bd_row[bd_col_match]) and str(bd_row[bd_col_match]).strip() != "":
                                 val_final = bd_row[bd_col_match]
                                 
                         new_row[col] = val_final
                     
-                    # Forzar Asignaciones Fijas
                     new_row['CÉDULA'] = int(cc)
                     new_row['NÚMERO DE HORAS'] = round(horas, 2)
                     new_row['CORTE'] = nuevo_corte
                     
-                    # Recálculo Financiero
                     val_hora = limpiar_dinero(new_row.get('VALOR HORA', 0))
                     if val_hora > 0:
                         new_row['TOTAL A PAGAR'] = round(horas * val_hora, 0)
@@ -793,7 +797,7 @@ if "Actualizador" in modo_trabajo:
                     
                 df_res = pd.DataFrame(result_rows)
                 
-                st.success(f"✅ ¡Cruce Exitoso! Se depuraron las horas de **{len(df_res)}** personas extrayendo la máxima información del reporte original y completando con tu BD.")
+                st.success(f"✅ ¡Cruce Exitoso! Se depuraron las horas de **{len(df_res)}** personas extrayendo la máxima información del reporte original y completando con tu base de datos (BD).")
                 
                 excel_out = io.BytesIO()
                 df_res.to_excel(excel_out, index=False, sheet_name="PAGOS PERSONAL POR SERVICIOS")
@@ -821,18 +825,23 @@ if "Actualizador" in modo_trabajo:
         except Exception as e:
             st.error(f"Error procesando el archivo: {e}")
 
+# ==============================================================================
+# MODOS DE GENERACIÓN DE DOCUMENTOS (INDIVIDUAL Y LOTE)
+# ==============================================================================
 else:
     if not cortes_disponibles:
         st.stop()
+    
+    # Este selectbox ahora es 100% dependiente de la hoja PAGOS PERSONAL POR SERVICIOS
     corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar:", cortes_disponibles)
     df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado]
 
     if df_pagos_corte['CONDUCTOR'].str.contains('MILTON', na=False).any():
         st.info("💡 **Aviso Importante:** Se detectó a Milton Javier Cortes. Asegúrate de tener una columna llamada **CANTIDAD** en tu pestaña *FUERAS PERIMETRO /ADIC* indicando cuántos viajes hizo a cada destino para que salgan desglosados en su cuenta.")
 
-    # ==============================================================================
+    # ------------------------------------------------------------------------------
     # MODO INDIVIDUAL
-    # ==============================================================================
+    # ------------------------------------------------------------------------------
     if "Individual" in modo_trabajo:
         titulares_unicos = df_pagos_corte[[col_cedula_titular, col_titular]].dropna().drop_duplicates()
         lista_opciones = [f"{row[col_titular]} (C.C/NIT: {row[col_cedula_titular]})" for _, row in titulares_unicos.iterrows()]
@@ -842,7 +851,6 @@ else:
             ced_seleccionada = opcion_seleccionada.split("(C.C/NIT: ")[1].replace(")", "").strip()
             grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular].astype(str).str.replace(".0", "", regex=False).str.strip() == ced_seleccionada]
             
-            # Pasamos las columnas maestras como argumento
             calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_titular, col_cedula_titular)
             
             if not calculos:
@@ -874,9 +882,9 @@ else:
             colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=pdf_ct_bytes, file_name=f"Cuenta_{ced_seleccionada}.pdf", mime="application/pdf", use_container_width=True)
             colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq_bytes, file_name=f"DocEq_{ced_seleccionada}.pdf", mime="application/pdf", use_container_width=True)
 
-    # ==============================================================================
+    # ------------------------------------------------------------------------------
     # MODO MASIVO (LOTE)
-    # ==============================================================================
+    # ------------------------------------------------------------------------------
     elif "Masiva" in modo_trabajo:
         if st.button("🚀 Procesar Lote General", use_container_width=True, type="primary"):
             mensaje_carga = st.info(f"📥 Procesando la información y unificando archivos de toda la quincena...")
@@ -897,7 +905,6 @@ else:
                 for cedula in cedulas_unicas:
                     grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular] == cedula]
                     
-                    # Pasamos las columnas maestras como argumento
                     calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_titular, col_cedula_titular)
                     
                     if not calculos:
