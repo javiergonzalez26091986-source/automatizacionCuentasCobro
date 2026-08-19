@@ -791,7 +791,7 @@ if "Actualizador" in modo_trabajo:
                 )
                 
                 st.info("""
-                💡 **Instrucciones para Juliette (Para no perder formatos en Drive):**
+                💡 **Instrucciones para descargar (Para no perder formatos en Drive):**
                 1. Descarga el Excel de arriba y ábrelo en tu computador.
                 2. Selecciona todos los datos (**Ctrl + E**) y cópialos (**Ctrl + C**).
                 3. Ve a tu Google Sheets, abre la pestaña `PAGOS PERSONAL POR SERVICIOS` y limpia la info vieja.
