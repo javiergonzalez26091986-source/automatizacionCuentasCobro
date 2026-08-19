@@ -93,7 +93,9 @@ def obtener_fecha_actual():
 @st.cache_data(ttl=600) 
 def cargar_datos(url):
     try:
-        response = requests.get(url)
+        # AJUSTE 1: Engañamos a Google para que NUNCA use caché agregando la hora actual a la URL
+        req_url = f"{url}?t={int(datetime.now().timestamp())}"
+        response = requests.get(req_url)
         return response.json()
     except Exception as e:
         return None
@@ -742,7 +744,9 @@ with col2:
     st.title("Generador Automático de Documentos")
     st.markdown("**SERGEM Mensajería S.A.S.**")
 
+# AJUSTE 2: Limpieza de caché obligatoria al dar click en Sincronizar
 if st.button("🔄 Sincronizar Base de Datos", key="btn_sync", type="secondary"):
+    cargar_datos.clear() 
     st.cache_data.clear()
     st.rerun()
 
@@ -765,6 +769,10 @@ if df_pagos_completo.empty:
 df_pagos_completo.columns = df_pagos_completo.columns.str.strip().str.upper()
 if not df_bd_maestra.empty: df_bd_maestra.columns = df_bd_maestra.columns.str.strip().str.upper()
 if not df_fuera.empty: df_fuera.columns = df_fuera.columns.str.strip().str.upper()
+
+# AJUSTE 3: Eliminar espacios en blanco invisibles al inicio y final de la columna CORTE
+if 'CORTE' in df_pagos_completo.columns:
+    df_pagos_completo['CORTE'] = df_pagos_completo['CORTE'].astype(str).str.strip().str.upper()
 
 col_prestador = obtener_nombre_columna(df_pagos_completo, ['A NOMBRE DE QUIEN HACE CUENTA DE COBRO', 'NOMBRE PRESTADOR', 'A NOMBRE DE QUIEN HACE CUENTA'])
 col_cedula_prestador = obtener_nombre_columna(df_pagos_completo, ['CÉDULA DE CUENTA DE COBRO', 'CEDULA DE CUENTA DE COBRO'])
@@ -794,7 +802,7 @@ if "Actualizador" in modo_trabajo:
     st.markdown("### ⏱️ Depurador y Actualizador de Horas (De Sistema a Drive)")
     st.info("Sube el archivo Excel biométrico. El programa construirá una tabla depurada basándose en tu pestaña BD para que la pegues en PAGOS PERSONAL POR SERVICIOS.")
     
-    nuevo_corte = st.text_input("✍️ Escriba el nombre exacto del Corte a generar (Ej: 16 AL 31 AGOSTO):")
+    nuevo_corte = st.text_input("✍️ Escriba el nombre exacto del Corte a generar (Ej: 1 AL 15 AGOSTO):")
     archivo_horas = st.file_uploader("📥 Sube el reporte de horas en formato Excel (.xlsx)", type=["xlsx", "xls"])
     
     if archivo_horas and nuevo_corte:
@@ -812,7 +820,6 @@ if "Actualizador" in modo_trabajo:
                 agg_dict[col_horas] = 'sum'
                 grouped = df_raw.groupby(col_cc, as_index=False).agg(agg_dict)
                 
-                # ¡MAGIA PURA! Extrae automáticamente absolutamente todas las columnas que existan en BD
                 columnas_destino = [c for c in df_bd_maestra.columns if str(c).strip() != "" and "UNNAMED" not in str(c).upper()]
                 
                 col_ced_bd = obtener_nombre_columna(df_bd_maestra, ['CÉDULA', 'CEDULA', 'C.C.', 'C.C', 'CC'])
@@ -834,7 +841,6 @@ if "Actualizador" in modo_trabajo:
                     
                     new_row = {}
                     
-                    # Rellenado Dinámico exacto a como esté en la BD Maestra
                     for col in columnas_destino:
                         val_final = ""
                         alias_busqueda = [col]
@@ -855,10 +861,9 @@ if "Actualizador" in modo_trabajo:
                                 
                         new_row[col] = val_final
                     
-                    # Imposiciones Fijas Matemáticas y Fechas
                     if col_ced_bd: new_row[col_ced_bd] = int(cc) if cc else ""
                     if col_horas_bd: new_row[col_horas_bd] = round(horas, 2)
-                    if col_corte_bd: new_row[col_corte_bd] = nuevo_corte
+                    if col_corte_bd: new_row[col_corte_bd] = nuevo_corte.strip().upper()
                     
                     val_hora = 0
                     if col_val_hora_bd:
@@ -908,7 +913,10 @@ else:
     # MODO INDIVIDUAL
     # ------------------------------------------------------------------------------
     if "Individual" in modo_trabajo:
-        titulares_unicos = df_pagos_corte[[col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco]].dropna().drop_duplicates(subset=[col_cedula_banco])
+        # AJUSTE 4: Protegemos contra celdas en blanco usando .fillna en lugar de .dropna
+        temp_df = df_pagos_corte[[col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco]].copy()
+        temp_df = temp_df.fillna("SIN DATO") 
+        titulares_unicos = temp_df.drop_duplicates(subset=[col_cedula_banco])
         
         lista_opciones = []
         for _, row in titulares_unicos.iterrows():
