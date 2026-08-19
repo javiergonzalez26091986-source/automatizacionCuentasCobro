@@ -150,7 +150,7 @@ def generar_txt_banco(df_banco):
         tipo_cta = "37" if "AHORRO" in str(row['TIPO_CUENTA']).upper() else "27"
         valor = int(row['VALOR_NETO_A_PAGAR'] * 100)
         valor_str = f"{valor:017d}"
-        filler = "00000                                                                                                     000000000000000          "
+        filler = "00000                                                                                               000000000000000                           "
         
         linea = (
             f"6{cedula}{nombre}{banco}{cuenta}{tipo_cta}{valor_str}"
@@ -538,7 +538,7 @@ def obtener_nombre_columna(df, opciones):
                 return col
     return None
 
-def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
+def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_titular, col_cedula_titular):
     conductores = []
     fpu_items_doc = []
     conductores_procesados_fpu = set()
@@ -551,8 +551,12 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
     suma_horas = 0
 
     row_titular = grupo_df.iloc[0]
-    nombre_titular = str(row_titular.get('A NOMBRE DE QUIEN HACE CUENTA DE COBRO', row_titular.get('NOMBRE TITULAR CUENTA BANCARIA', 'S/N'))).strip()
-    cedula_titular = str(row_titular.get('CÉDULA DE CUENTA DE COBRO', row_titular.get('CÉDULA TITULAR', ''))).strip()
+    
+    # === AQUÍ ESTÁ LA CORRECCIÓN: Toma 100% de la G y la H ===
+    nombre_titular = str(row_titular.get(col_titular, 'S/N')).strip()
+    cedula_titular = str(row_titular.get(col_cedula_titular, '')).strip()
+    # =========================================================
+    
     banco = str(row_titular.get('BANCO', '')).strip()
     tipo_cuenta = str(row_titular.get('TIPO CUENTA', '')).strip()
     num_cuenta = str(row_titular.get('NO. CUENTA', '')).strip()
@@ -684,8 +688,9 @@ if df_pagos_completo.empty:
 df_pagos_completo.columns = df_pagos_completo.columns.str.strip().str.upper()
 if not df_fuera.empty: df_fuera.columns = df_fuera.columns.str.strip().str.upper()
 
-col_titular = obtener_nombre_columna(df_pagos_completo, ['A NOMBRE DE QUIEN HACE CUENTA DE COBRO', 'NOMBRE TITULAR CUENTA BANCARIA', 'NOMBRE_TITULAR'])
-col_cedula_titular = obtener_nombre_columna(df_pagos_completo, ['CÉDULA DE CUENTA DE COBRO', 'CÉDULA TITULAR', 'CEDULA_TITULAR'])
+# === AQUÍ FORZAMOS A QUE LEA ESTRICTAMENTE DE LAS COLUMNAS G y H ===
+col_titular = obtener_nombre_columna(df_pagos_completo, ['NOMBRE TITULAR CUENTA BANCARIA', 'A NOMBRE DE QUIEN HACE CUENTA DE COBRO', 'NOMBRE_TITULAR'])
+col_cedula_titular = obtener_nombre_columna(df_pagos_completo, ['CÉDULA TITULAR', 'CÉDULA DE CUENTA DE COBRO', 'CEDULA_TITULAR'])
 
 if not col_titular or not col_cedula_titular:
     st.error("No se encontraron las columnas maestras de TITULAR o CÉDULA en tu BD.")
@@ -700,7 +705,7 @@ modo_trabajo = st.radio("⚙️ Modo de trabajo:",
                          "⏱️ Actualizador de Horas Automático (Excel a Drive)"], horizontal=True)
 
 # ==============================================================================
-# MODO ACTUALIZADOR DE HORAS (NUEVO REQUERIMIENTO CUMPLIDO 100%)
+# MODO ACTUALIZADOR DE HORAS
 # ==============================================================================
 if "Actualizador" in modo_trabajo:
     st.markdown("### ⏱️ Depurador y Actualizador de Horas (De Sistema a Drive)")
@@ -822,7 +827,6 @@ else:
     corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar:", cortes_disponibles)
     df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado]
 
-    # Info especial para Fueras de Perímetro
     if df_pagos_corte['CONDUCTOR'].str.contains('MILTON', na=False).any():
         st.info("💡 **Aviso Importante:** Se detectó a Milton Javier Cortes. Asegúrate de tener una columna llamada **CANTIDAD** en tu pestaña *FUERAS PERIMETRO /ADIC* indicando cuántos viajes hizo a cada destino para que salgan desglosados en su cuenta.")
 
@@ -838,7 +842,8 @@ else:
             ced_seleccionada = opcion_seleccionada.split("(C.C/NIT: ")[1].replace(")", "").strip()
             grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular].astype(str).str.replace(".0", "", regex=False).str.strip() == ced_seleccionada]
             
-            calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado)
+            # Pasamos las columnas maestras como argumento
+            calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_titular, col_cedula_titular)
             
             if not calculos:
                 st.warning("Este titular tiene saldo neto en $0 para este corte.")
@@ -891,7 +896,9 @@ else:
                 
                 for cedula in cedulas_unicas:
                     grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_titular] == cedula]
-                    calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado)
+                    
+                    # Pasamos las columnas maestras como argumento
+                    calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_titular, col_cedula_titular)
                     
                     if not calculos:
                         ignorados += 1
