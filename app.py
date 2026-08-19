@@ -44,6 +44,17 @@ st.markdown("""
         color: #1e293b !important;
     }
     
+    /* RESALTE ESPECÍFICO PARA LAS CAJAS DE TEXTO (CORRECCIÓN UI) */
+    div[data-testid="stTextInput"] input {
+        border: 2px solid #E3000F !important;
+        background-color: #fff1f2 !important;
+        color: #E3000F !important;
+        font-size: 1.15rem !important;
+        font-weight: 800 !important;
+        padding: 0.75rem !important;
+        border-radius: 8px !important;
+    }
+    
     div.stButton > button {
         border-radius: 8px !important;
         font-weight: 800 !important;
@@ -206,7 +217,6 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.cell(0, 8, f"$ {datos['neto_pagar']:,.0f}", 0, 1)
     pdf.ln(6)
     
-    # Tabla de Concepto Unificada (Horas y FPU)
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(25, 6, "CONCEPTO:", 0, 1)
     pdf.set_font("helvetica", "", 10)
@@ -406,7 +416,6 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.cell(80, 5, f"C.C. / NIT: {datos['cedula_titular']}", 0, 1)
     pdf.cell(80, 5, f"NOMBRE: {datos['nombre_titular']}", 0, 1)
 
-
 def construir_hoja_documento_equivalente_excel(ws, datos):
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="E3000F", end_color="E3000F", fill_type="solid")
@@ -562,7 +571,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
         porcentaje_ica = 0.01 if ciudad == 'CALI' else 0.0
         tasa_total_impuestos = porcentaje_retefuente + porcentaje_ica
 
-        # REQUERIMIENTO 2: Extracción detallada de Fueras de Perímetro
         fuera_perimetro_neto = 0.0
         if "MILTON" in nombre_conductor and not df_fuera.empty and nombre_conductor not in conductores_procesados_fpu:
             conductores_procesados_fpu.add(nombre_conductor)
@@ -580,7 +588,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
                             valor_uni_neto = limpiar_dinero(f_row.get(col_val, 0))
                             tot_neto = cant * valor_uni_neto
                             
-                            # Convertimos a bruto (Base real)
                             tot_bruto = round(tot_neto / (1 - tasa_total_impuestos))
                             val_uni_bruto = round(valor_uni_neto / (1 - tasa_total_impuestos))
                             
@@ -596,18 +603,15 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado):
                             })
                     except: pass
 
-        # CORRECCIÓN BUG 1: Inicialización correcta de la variable
         total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
 
         ingreso_bruto_total = round(total_neto_esperado / (1 - tasa_total_impuestos))
         retefuente = round(ingreso_bruto_total * porcentaje_retefuente)
         ica = round(ingreso_bruto_total * porcentaje_ica)
 
-        # Base bruta real de solo las horas laboradas (Restando la base bruta de FPU)
         fpu_bruto_cond = round(fuera_perimetro_neto / (1 - tasa_total_impuestos)) if fuera_perimetro_neto > 0 else 0.0
         ingreso_base_bruta = ingreso_bruto_total - fpu_bruto_cond
         
-        # El neto que le corresponde al conductor SOLO por sus horas 
         neto_total_conductor = ingreso_bruto_total - retefuente - ica
         neto_solo_horas = neto_total_conductor - fuera_perimetro_neto
 
@@ -696,7 +700,7 @@ modo_trabajo = st.radio("⚙️ Modo de trabajo:",
                          "⏱️ Actualizador de Horas Automático (Excel a Drive)"], horizontal=True)
 
 # ==============================================================================
-# MODO ACTUALIZADOR DE HORAS (REQUERIMIENTO PRINCIPAL)
+# MODO ACTUALIZADOR DE HORAS (NUEVO REQUERIMIENTO CUMPLIDO 100%)
 # ==============================================================================
 if "Actualizador" in modo_trabajo:
     st.markdown("### ⏱️ Depurador y Actualizador de Horas (De Sistema a Drive)")
@@ -711,17 +715,17 @@ if "Actualizador" in modo_trabajo:
             
             col_cc = obtener_nombre_columna(df_raw, ['CC', 'CEDULA', 'CÉDULA'])
             col_horas = obtener_nombre_columna(df_raw, ['TOTAL_HORAS', 'TOTAL HORAS', 'HORAS'])
-            col_mensajero = obtener_nombre_columna(df_raw, ['MENSAJERO', 'CONDUCTOR', 'NOMBRE'])
             
             if col_cc and col_horas:
                 df_raw[col_cc] = pd.to_numeric(df_raw[col_cc], errors='coerce')
                 df_raw = df_raw.dropna(subset=[col_cc])
                 
-                # Agrupamos por CC y sumamos horas
-                agg_dict = {col_horas: 'sum'}
-                if col_mensajero: agg_dict[col_mensajero] = 'first'
+                # Agrupamos por CC. Sumamos las horas y conservamos la primera ocurrencia de las demás columnas
+                agg_dict = {col: 'first' for col in df_raw.columns if col != col_cc and col != col_horas}
+                agg_dict[col_horas] = 'sum'
                 grouped = df_raw.groupby(col_cc, as_index=False).agg(agg_dict)
                 
+                # Estructura obligatoria a replicar para Google Sheets
                 columnas_destino = [
                     "CIUDAD", "CLIENTE", "CONDUCTOR", "CÉDULA", 
                     "A NOMBRE DE QUIEN HACE CUENTA DE COBRO", "CÉDULA DE CUENTA DE COBRO", 
@@ -731,7 +735,6 @@ if "Actualizador" in modo_trabajo:
                 ]
                 
                 col_ced_bd = obtener_nombre_columna(df_pagos_completo, ['CÉDULA', 'CEDULA', 'C.C.', 'C.C', 'CC'])
-                col_vh_bd = obtener_nombre_columna(df_pagos_completo, ['VALOR HORA', 'VALOR_HORA'])
                 
                 result_rows = []
                 for _, row in grouped.iterrows():
@@ -740,42 +743,52 @@ if "Actualizador" in modo_trabajo:
                     
                     match = pd.DataFrame()
                     if col_ced_bd:
-                        # CORRECCIÓN BUG 2: Limpieza correcta del .0 sin usar regex (para que Python no colapse)
                         ced_bd = df_pagos_completo[col_ced_bd].astype(str).str.replace(".0", "", regex=False).str.strip()
                         ced_match = str(cc).replace(".0", "").strip()
                         match = df_pagos_completo[ced_bd == ced_match]
                     
                     new_row = {col: "" for col in columnas_destino}
                     
-                    if not match.empty:
-                        bd_row = match.iloc[0]
-                        # Cruce inteligente: Copiamos todo lo de la BD
-                        for col in columnas_destino:
-                            bd_col_match = obtener_nombre_columna(df_pagos_completo, [col])
-                            if bd_col_match:
-                                new_row[col] = bd_row[bd_col_match]
-                                
-                        new_row['NÚMERO DE HORAS'] = round(horas, 2)
-                        new_row['CORTE'] = nuevo_corte
+                    # Rellenado Inteligente Columna por Columna
+                    for col in columnas_destino:
+                        val_final = ""
+                        alias_busqueda = [col]
                         
-                        try:
-                            vh = limpiar_dinero(bd_row.get(col_vh_bd, 0))
-                            new_row['TOTAL A PAGAR'] = round(horas * vh, 0)
-                        except:
-                            new_row['TOTAL A PAGAR'] = 0
+                        if col == "CLIENTE": alias_busqueda.extend(["EMPRESA", "PUNTO_VENTA"])
+                        if col == "CONDUCTOR": alias_busqueda.extend(["MENSAJERO", "NOMBRE"])
+                        if col == "VALOR HORA": alias_busqueda.extend(["VALOR_HORA"])
+                        
+                        # PRIORIDAD 1: Buscar en el Excel Crudo
+                        col_raw_match = obtener_nombre_columna(df_raw, alias_busqueda)
+                        if col_raw_match and pd.notna(row[col_raw_match]) and str(row[col_raw_match]).strip() != "":
+                            val_final = row[col_raw_match]
                             
+                        # PRIORIDAD 2: Si no está en el crudo, buscar en la BD Maestra
+                        elif not match.empty:
+                            bd_row = match.iloc[0]
+                            bd_col_match = obtener_nombre_columna(df_pagos_completo, alias_busqueda)
+                            if bd_col_match and pd.notna(bd_row[bd_col_match]) and str(bd_row[bd_col_match]).strip() != "":
+                                val_final = bd_row[bd_col_match]
+                                
+                        new_row[col] = val_final
+                    
+                    # Forzar Asignaciones Fijas
+                    new_row['CÉDULA'] = int(cc)
+                    new_row['NÚMERO DE HORAS'] = round(horas, 2)
+                    new_row['CORTE'] = nuevo_corte
+                    
+                    # Recálculo Financiero
+                    val_hora = limpiar_dinero(new_row.get('VALOR HORA', 0))
+                    if val_hora > 0:
+                        new_row['TOTAL A PAGAR'] = round(horas * val_hora, 0)
                     else:
-                        # Si es alguien nuevo que no está en la BD
-                        new_row['CÉDULA'] = int(cc)
-                        if col_mensajero: new_row['CONDUCTOR'] = row[col_mensajero]
-                        new_row['NÚMERO DE HORAS'] = round(horas, 2)
-                        new_row['CORTE'] = nuevo_corte
+                        new_row['TOTAL A PAGAR'] = 0
                         
                     result_rows.append(new_row)
                     
                 df_res = pd.DataFrame(result_rows)
                 
-                st.success(f"✅ ¡Cruce Exitoso! Se depuraron las horas de **{len(df_res)}** personas y se cruzaron con tu BD.")
+                st.success(f"✅ ¡Cruce Exitoso! Se depuraron las horas de **{len(df_res)}** personas extrayendo la máxima información del reporte original y completando con tu BD.")
                 
                 excel_out = io.BytesIO()
                 df_res.to_excel(excel_out, index=False, sheet_name="PAGOS PERSONAL POR SERVICIOS")
@@ -791,16 +804,15 @@ if "Actualizador" in modo_trabajo:
                 )
                 
                 st.info("""
-                💡 **Instrucciones para descargar (Para no perder formatos en Drive):**
+                💡 **Instrucciones de Pegado (Para no perder formatos en Drive):**
                 1. Descarga el Excel de arriba y ábrelo en tu computador.
                 2. Selecciona todos los datos (**Ctrl + E**) y cópialos (**Ctrl + C**).
                 3. Ve a tu Google Sheets, abre la pestaña `PAGOS PERSONAL POR SERVICIOS` y limpia la info vieja.
                 4. Haz clic derecho en la celda A1 y presiona **"Pegado Especial" > "Solo Valores"**. 
-                *(De esta forma el drive mantiene sus colores y bordes intactos).*
                 """)
                 
             else:
-                st.error("El archivo subido no tiene la estructura del sistema. Faltan las columnas 'CC' o 'TOTAL_HORAS'.")
+                st.error("El archivo subido no tiene la estructura biométrica. Faltan las columnas 'CC' o 'TOTAL_HORAS'.")
         except Exception as e:
             st.error(f"Error procesando el archivo: {e}")
 
@@ -858,7 +870,7 @@ else:
             colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq_bytes, file_name=f"DocEq_{ced_seleccionada}.pdf", mime="application/pdf", use_container_width=True)
 
     # ==============================================================================
-    # MODO MASIVO (LOTE) - DESCARGAS INDEPENDIENTES
+    # MODO MASIVO (LOTE)
     # ==============================================================================
     elif "Masiva" in modo_trabajo:
         if st.button("🚀 Procesar Lote General", use_container_width=True, type="primary"):
@@ -907,14 +919,12 @@ else:
                     })
                     contador += 1
                 
-                # Buffer Zip Cuentas
                 zip_cuentas_io = io.BytesIO()
                 with zipfile.ZipFile(zip_cuentas_io, "w", zipfile.ZIP_DEFLATED) as zipf:
                     out_ct = pdf_maestro_cuentas.output()
                     zipf.writestr("Cuentas_de_Cobro_Masivas.pdf", out_ct.encode('latin-1') if isinstance(out_ct, str) else bytes(out_ct))
                 zip_cuentas_io.seek(0)
                 
-                # Buffer Zip Equivalentes
                 zip_eq_io = io.BytesIO()
                 with zipfile.ZipFile(zip_eq_io, "w", zipfile.ZIP_DEFLATED) as zipf:
                     out_eq = pdf_maestro_equivalentes.output()
@@ -925,7 +935,6 @@ else:
                     zipf.writestr("Documentos_Equivalentes_Pestañas.xlsx", excel_io.read())
                 zip_eq_io.seek(0)
                 
-                # Generar TXT Banco
                 df_banco = pd.DataFrame(pagos_procesados_banco)
                 texto_banco = generar_txt_banco(df_banco)
                 
@@ -934,7 +943,6 @@ else:
                 
                 if len(df_banco) > 0:
                     st.markdown("### 📥 Descargas Corporativas Independientes")
-                    # REQUERIMIENTO 1 (CUMPLIDO): Se ocultó la vista previa del archivo plano de aquí abajo
                     colD1, colD2, colD3 = st.columns(3)
                     
                     colD1.download_button(
