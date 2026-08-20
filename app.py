@@ -1106,7 +1106,7 @@ with tab_generador:
                         df_nuevos.to_excel(excel_nuevos_io, index=False, sheet_name="PERSONAL NUEVO")
                         excel_nuevos_io.seek(0)
 
-                        st.error(f"🚨 **ATENCIÓN - SE DETECTARON {count_nuevos} PERSONAS NUEVAS**\n\nLos soportes contables se generaron de forma independiente y también se compiló el listado para el señor José. Utiliza los botones para descargar la información:")
+                        st.error(f"🚨 **ATENCIÓN - SE DETECTARON {count_nuevos} PERSONAS NUEVAS**\n\nSus soportes contables se generaron de forma independiente y también se compiló su listado para Don José. Utiliza estos botones para descargar su información:")
                         
                         colN1, colN2, colN3 = st.columns(3)
                         colN1.download_button("1️⃣ 📥 Listado Excel (Para Don José)", data=excel_nuevos_io, file_name="Listado_Nuevos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
