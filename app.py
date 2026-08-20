@@ -1093,6 +1093,11 @@ with tab_informes:
         col_total_pagar = obtener_nombre_columna(df_informe, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR'])
         df_informe['Valor Numérico'] = df_informe[col_total_pagar].apply(limpiar_dinero)
         
+        # Limpiar columna de horas para evitar errores ValueError en las tablas
+        col_horas_inf = obtener_nombre_columna(df_informe, ['NÚMERO DE HORAS', 'NUMERO DE HORAS', 'HORAS'])
+        if col_horas_inf:
+            df_informe[col_horas_inf] = pd.to_numeric(df_informe[col_horas_inf], errors='coerce').fillna(0)
+        
         total_cuentas = len(df_informe[col_cedula_banco].dropna().unique())
         cuentas_cero = len(df_informe[df_informe['Valor Numérico'] <= 0])
         total_consignar = df_informe['Valor Numérico'].sum()
@@ -1106,7 +1111,6 @@ with tab_informes:
         st.divider()
         st.markdown("### 📈 Análisis Financiero Detallado")
         
-        # Pestañas Internas para organizar visualmente y no saturar
         t_cli, t_ban, t_con = st.tabs(["🏢 Consolidado por Cliente", "🏦 Distribución Bancaria", "🛵 Análisis de Conductores"])
         
         # 1. MÓDULO POR CLIENTE
@@ -1115,7 +1119,7 @@ with tab_informes:
             col_cliente = obtener_nombre_columna(df_informe, ['CLIENTE', 'EMPRESA'])
             if col_cliente:
                 df_cli = df_informe.groupby(col_cliente)['Valor Numérico'].sum().reset_index()
-                df_cli = df_cli.sort_values('Valor Numérico', ascending=True) # Ascendente para que el gráfico de barras horizontales quede de mayor a menor de arriba hacia abajo
+                df_cli = df_cli.sort_values('Valor Numérico', ascending=True) 
                 
                 cc1, cc2 = st.columns([3, 2])
                 
@@ -1126,7 +1130,7 @@ with tab_informes:
                         y=col_cliente, 
                         orientation='h',
                         title="Distribución Total a Pagar por Cliente",
-                        text_auto='$.3s', # Formato abreviado de dinero
+                        text_auto='$.3s',
                         color='Valor Numérico',
                         color_continuous_scale='Reds'
                     )
@@ -1136,6 +1140,8 @@ with tab_informes:
                 with cc2:
                     st.markdown("**📋 Tabla Detallada Exacta**")
                     df_cli_table = df_cli.sort_values('Valor Numérico', ascending=False).rename(columns={col_cliente: "Cliente", "Valor Numérico": "Total a Pagar"})
+                    df_cli_table["Total a Pagar"] = pd.to_numeric(df_cli_table["Total a Pagar"], errors='coerce').fillna(0)
+                    
                     st.dataframe(
                         df_cli_table.style.format({"Total a Pagar": "${:,.0f}"}),
                         hide_index=True,
@@ -1147,7 +1153,6 @@ with tab_informes:
             st.markdown("#### 🏦 Distribución de Fondos por Entidad Bancaria")
             col_banco_graf = obtener_nombre_columna(df_informe, ['BANCO', 'BANCO DESTINO'])
             if col_banco_graf:
-                # Agrupamos sumando dinero y contando número de cuentas a transferir
                 df_ban = df_informe.groupby(col_banco_graf).agg(
                     Cuentas=(col_banco_graf, 'count'),
                     Total=('Valor Numérico', 'sum')
@@ -1171,6 +1176,8 @@ with tab_informes:
                 with cb2:
                     st.markdown("**📋 Directorio de Transferencias Bancarias**")
                     df_ban_table = df_ban.rename(columns={col_banco_graf: "Entidad Bancaria", "Cuentas": "Cant. Transferencias", "Total": "Dinero a Girar"})
+                    df_ban_table["Dinero a Girar"] = pd.to_numeric(df_ban_table["Dinero a Girar"], errors='coerce').fillna(0)
+                    
                     st.dataframe(
                         df_ban_table.style.format({"Dinero a Girar": "${:,.0f}"}),
                         hide_index=True,
@@ -1181,14 +1188,12 @@ with tab_informes:
         with t_con:
             st.markdown("#### 🛵 Top 15 de Conductores con Mayor Volumen de Pago")
             col_cond = obtener_nombre_columna(df_informe, ['CONDUCTOR', 'NOMBRES'])
-            col_horas = obtener_nombre_columna(df_informe, ['NÚMERO DE HORAS', 'NUMERO DE HORAS', 'HORAS'])
             
             if col_cond:
                 agg_dict_cond = {'Valor Numérico': 'sum'}
-                if col_horas: agg_dict_cond[col_horas] = 'sum'
+                if col_horas_inf: agg_dict_cond[col_horas_inf] = 'sum'
                 
                 df_cond = df_informe.groupby(col_cond).agg(agg_dict_cond).reset_index()
-                # Extraemos el top 15 y lo ordenamos ascendente para Plotly Horizontal
                 df_cond_top = df_cond.sort_values('Valor Numérico', ascending=False).head(15).sort_values('Valor Numérico', ascending=True)
                 
                 c_c1, c_c2 = st.columns([3, 2])
@@ -1212,15 +1217,20 @@ with tab_informes:
                     df_cond_table = df_cond.sort_values('Valor Numérico', ascending=False)
                     
                     rename_dict = {col_cond: "Conductor", "Valor Numérico": "Total a Pagar"}
-                    if col_horas: rename_dict[col_horas] = "Horas Facturadas"
+                    if col_horas_inf: rename_dict[col_horas_inf] = "Horas Facturadas"
                     df_cond_table = df_cond_table.rename(columns=rename_dict)
                     
+                    # FORZADO DE TIPOS NUMÉRICOS PARA EVITAR VALUEERROR
+                    df_cond_table["Total a Pagar"] = pd.to_numeric(df_cond_table["Total a Pagar"], errors='coerce').fillna(0)
+                    
                     format_dict = {"Total a Pagar": "${:,.0f}"}
-                    if "Horas Facturadas" in df_cond_table.columns: format_dict["Horas Facturadas"] = "{:,.1f}"
+                    if "Horas Facturadas" in df_cond_table.columns: 
+                        df_cond_table["Horas Facturadas"] = pd.to_numeric(df_cond_table["Horas Facturadas"], errors='coerce').fillna(0)
+                        format_dict["Horas Facturadas"] = "{:,.1f}"
                     
                     st.dataframe(
                         df_cond_table.style.format(format_dict),
                         hide_index=True,
                         use_container_width=True,
-                        height=400 # Hace la tabla scrolleable hacia abajo
+                        height=400 
                     )
