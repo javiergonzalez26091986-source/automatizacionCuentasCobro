@@ -93,7 +93,6 @@ def obtener_fecha_actual():
 @st.cache_data(ttl=600) 
 def cargar_datos(url):
     try:
-        # AJUSTE 1: Engañamos a Google para que NUNCA use caché agregando la hora actual a la URL
         req_url = f"{url}?t={int(datetime.now().timestamp())}"
         response = requests.get(req_url)
         return response.json()
@@ -118,6 +117,10 @@ def obtener_horas(row):
                 if not pd.isna(val): return val
             except: pass
     return 1.0
+
+def get_pdf_bytes(pdf_obj):
+    out = pdf_obj.output()
+    return out.encode('latin-1') if isinstance(out, str) else bytes(out)
 
 # ==============================================================================
 # GENERACIÓN DE ARCHIVO PLANO BANCARIO (ESTRUCTURA EXACTA TXT)
@@ -634,9 +637,14 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
         if col_otros_desc: suma_otros_desc += limpiar_dinero(row.get(col_otros_desc, 0))
 
         ingreso_neto_esperado = limpiar_dinero(row.get('TOTAL A PAGAR', 0))
-        if ingreso_neto_esperado <= 0: continue
-
         nombre_conductor = str(row.get('CONDUCTOR', '')).strip().upper()
+        
+        # AHORA NO DESCARTAMOS LOS $0 DIRECTAMENTE. 
+        # Solo descartamos si es un registro totalmente en blanco o erróneo (sin nombre).
+        # Esto permite procesar a las personas que tienen Total 0 pero tienen anticipos (Ej: Jilmer)
+        if ingreso_neto_esperado <= 0 and not nombre_conductor:
+            continue
+
         ciudad = str(row.get('CIUDAD', '')).upper().strip()
         cedula_conductor = str(row.get('CÉDULA', row.get('CEDULA', ''))).strip()
         horas = obtener_horas(row)
@@ -679,7 +687,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
 
         total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
 
-        ingreso_bruto_total = round(total_neto_esperado / (1 - tasa_total_impuestos))
+        ingreso_bruto_total = round(total_neto_esperado / (1 - tasa_total_impuestos)) if total_neto_esperado > 0 else 0
         retefuente = round(ingreso_bruto_total * porcentaje_retefuente)
         ica = round(ingreso_bruto_total * porcentaje_ica)
 
@@ -744,7 +752,6 @@ with col2:
     st.title("Generador Automático de Documentos")
     st.markdown("**SERGEM Mensajería S.A.S.**")
 
-# AJUSTE 2: Limpieza de caché obligatoria al dar click en Sincronizar
 if st.button("🔄 Sincronizar Base de Datos", key="btn_sync", type="secondary"):
     cargar_datos.clear() 
     st.cache_data.clear()
@@ -770,7 +777,6 @@ df_pagos_completo.columns = df_pagos_completo.columns.str.strip().str.upper()
 if not df_bd_maestra.empty: df_bd_maestra.columns = df_bd_maestra.columns.str.strip().str.upper()
 if not df_fuera.empty: df_fuera.columns = df_fuera.columns.str.strip().str.upper()
 
-# AJUSTE 3: Eliminar espacios en blanco invisibles al inicio y final de la columna CORTE
 if 'CORTE' in df_pagos_completo.columns:
     df_pagos_completo['CORTE'] = df_pagos_completo['CORTE'].astype(str).str.strip().str.upper()
 
@@ -913,7 +919,6 @@ else:
     # MODO INDIVIDUAL
     # ------------------------------------------------------------------------------
     if "Individual" in modo_trabajo:
-        # AJUSTE 4: Protegemos contra celdas en blanco usando .fillna en lugar de .dropna
         temp_df = df_pagos_corte[[col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco]].copy()
         temp_df = temp_df.fillna("SIN DATO") 
         titulares_unicos = temp_df.drop_duplicates(subset=[col_cedula_banco])
@@ -933,7 +938,7 @@ else:
             calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco, col_estado, col_anticipos, col_otros_desc)
             
             if not calculos:
-                st.warning("Este titular tiene saldo neto en $0 para este corte.")
+                st.warning("Este titular tiene saldo neto en $0 para este corte sin anticipos reportados.")
             else:
                 st.markdown(f"### Resumen Financiero: {calculos['nombre_prestador']}")
                 if calculos['es_nuevo']:
@@ -957,39 +962,37 @@ else:
             pdf_ct = FPDF(); agregar_pagina_pdf_cuenta_cobro(pdf_ct, datos_doc)
             pdf_eq = FPDF(); agregar_pagina_pdf_doc_equivalente(pdf_eq, datos_doc)
             
-            out_ct = pdf_ct.output()
-            pdf_ct_bytes = out_ct.encode('latin-1') if isinstance(out_ct, str) else bytes(out_ct)
-            
-            out_eq = pdf_eq.output()
-            pdf_eq_bytes = out_eq.encode('latin-1') if isinstance(out_eq, str) else bytes(out_eq)
-            
             colBtn1, colBtn2 = st.columns(2)
-            colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=pdf_ct_bytes, file_name=f"Cuenta_{calculos['cedula_prestador']}.pdf", mime="application/pdf", use_container_width=True)
-            colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=pdf_eq_bytes, file_name=f"DocEq_{calculos['cedula_prestador']}.pdf", mime="application/pdf", use_container_width=True)
+            colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=get_pdf_bytes(pdf_ct), file_name=f"Cuenta_{calculos['cedula_prestador']}.pdf", mime="application/pdf", use_container_width=True)
+            colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=get_pdf_bytes(pdf_eq), file_name=f"DocEq_{calculos['cedula_prestador']}.pdf", mime="application/pdf", use_container_width=True)
 
     # ------------------------------------------------------------------------------
     # MODO MASIVO (LOTE)
     # ------------------------------------------------------------------------------
     elif "Masiva" in modo_trabajo:
         if st.button("🚀 Procesar Lote General", use_container_width=True, type="primary"):
-            mensaje_carga = st.info(f"📥 Procesando la información y unificando archivos de toda la quincena...")
+            mensaje_carga = st.info(f"📥 Procesando la información y empaquetando archivos de forma inteligente...")
             
             try:
                 pagos_procesados_banco = []
                 nuevos_detectados = []
                 ceros_detectados = []
                 
-                ignorados = 0
+                ignorados = count_banco = count_nuevos = count_ceros = 0
                 fecha_actual = obtener_fecha_actual() 
                 
-                pdf_maestro_cuentas = FPDF()
-                pdf_maestro_equivalentes = FPDF()
-                wb_maestro_equivalentes = openpyxl.Workbook()
-                wb_maestro_equivalentes.remove(wb_maestro_equivalentes.active)
+                # SEPARACIÓN DE INSTANCIAS PARA GENERACIÓN TOTALMENTE INDEPENDIENTE
+                pdf_ct_banco = FPDF(); pdf_eq_banco = FPDF()
+                wb_eq_banco = openpyxl.Workbook(); wb_eq_banco.remove(wb_eq_banco.active)
                 
-                contador = 1
+                pdf_ct_nuevos = FPDF(); pdf_eq_nuevos = FPDF()
+                wb_eq_nuevos = openpyxl.Workbook(); wb_eq_nuevos.remove(wb_eq_nuevos.active)
+                
+                pdf_ct_ceros = FPDF(); pdf_eq_ceros = FPDF()
+                wb_eq_ceros = openpyxl.Workbook(); wb_eq_ceros.remove(wb_eq_ceros.active)
                 
                 cedulas_banco_unicas = df_pagos_corte[col_cedula_banco].dropna().unique()
+                contador = 1
                 
                 for ced_banco in cedulas_banco_unicas:
                     grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_banco] == ced_banco]
@@ -1002,20 +1005,31 @@ else:
                     
                     datos_doc = calculos.copy()
                     datos_doc.update({'id': str(contador).zfill(3), 'fecha_emision': fecha_actual, 'corte_fechas': corte_seleccionado})
-
-                    agregar_pagina_pdf_cuenta_cobro(pdf_maestro_cuentas, datos_doc)
-                    agregar_pagina_pdf_doc_equivalente(pdf_maestro_equivalentes, datos_doc)
-
                     nombre_pestana = f"{contador}_{datos_doc['nombre_prestador'][:20]}".replace(":", "").replace("/", "-")
-                    ws_nuevo = wb_maestro_equivalentes.create_sheet(title=nombre_pestana)
-                    construir_hoja_documento_equivalente_excel(ws_nuevo, datos_doc)
 
-                    # Filtro de Seguridad Bancaria (Estado NUEVO y Saldos CERO)
+                    # DISTRIBUCIÓN INTELIGENTE SEGÚN REQUERIMIENTOS
                     if datos_doc['es_nuevo']:
-                        nuevos_detectados.append(f"👤 {datos_doc['nombre_prestador']} (C.C: {datos_doc['cedula_prestador']})")
+                        agregar_pagina_pdf_cuenta_cobro(pdf_ct_nuevos, datos_doc)
+                        agregar_pagina_pdf_doc_equivalente(pdf_eq_nuevos, datos_doc)
+                        ws = wb_eq_nuevos.create_sheet(title=nombre_pestana)
+                        construir_hoja_documento_equivalente_excel(ws, datos_doc)
+                        nuevos_detectados.append(datos_doc)
+                        count_nuevos += 1
+                        
                     elif datos_doc['neto_final'] <= 0:
-                        ceros_detectados.append(f"👤 {datos_doc['nombre_prestador']} (C.C: {datos_doc['cedula_prestador']})")
+                        agregar_pagina_pdf_cuenta_cobro(pdf_ct_ceros, datos_doc)
+                        agregar_pagina_pdf_doc_equivalente(pdf_eq_ceros, datos_doc)
+                        ws = wb_eq_ceros.create_sheet(title=nombre_pestana)
+                        construir_hoja_documento_equivalente_excel(ws, datos_doc)
+                        ceros_detectados.append(datos_doc)
+                        count_ceros += 1
+                        
                     else:
+                        agregar_pagina_pdf_cuenta_cobro(pdf_ct_banco, datos_doc)
+                        agregar_pagina_pdf_doc_equivalente(pdf_eq_banco, datos_doc)
+                        ws = wb_eq_banco.create_sheet(title=nombre_pestana)
+                        construir_hoja_documento_equivalente_excel(ws, datos_doc)
+                        
                         pagos_procesados_banco.append({
                             'NIT_BENEFICIARIO': datos_doc['cedula_titular_banco'],
                             'NOMBRE_BENEFICIARIO': datos_doc['nombre_titular_banco'],
@@ -1026,53 +1040,99 @@ else:
                             'FECHA_PAGO': datetime.now(timezone(timedelta(hours=-5))).strftime("%Y/%m/%d"),
                             'CONCEPTO': 'NOMINA'
                         })
+                        count_banco += 1
+                        
                     contador += 1
                 
-                zip_cuentas_io = io.BytesIO()
-                with zipfile.ZipFile(zip_cuentas_io, "w", zipfile.ZIP_DEFLATED) as zipf:
-                    out_ct = pdf_maestro_cuentas.output()
-                    zipf.writestr("Cuentas_de_Cobro_Masivas.pdf", out_ct.encode('latin-1') if isinstance(out_ct, str) else bytes(out_ct))
-                zip_cuentas_io.seek(0)
+                # PREPARACIÓN DE DESCARGAS PRINCIPALES (BANCO)
+                zip_cuentas_banco_io = io.BytesIO()
+                if count_banco > 0:
+                    with zipfile.ZipFile(zip_cuentas_banco_io, "w", zipfile.ZIP_DEFLATED) as zipf:
+                        zipf.writestr("Cuentas_de_Cobro_Aprobadas.pdf", get_pdf_bytes(pdf_ct_banco))
+                zip_cuentas_banco_io.seek(0)
                 
-                zip_eq_io = io.BytesIO()
-                with zipfile.ZipFile(zip_eq_io, "w", zipfile.ZIP_DEFLATED) as zipf:
-                    out_eq = pdf_maestro_equivalentes.output()
-                    zipf.writestr("Documentos_Equivalentes_Masivos.pdf", out_eq.encode('latin-1') if isinstance(out_eq, str) else bytes(out_eq))
-                    excel_io = io.BytesIO()
-                    wb_maestro_equivalentes.save(excel_io)
-                    excel_io.seek(0)
-                    zipf.writestr("Documentos_Equivalentes_Pestañas.xlsx", excel_io.read())
-                zip_eq_io.seek(0)
+                zip_eq_banco_io = io.BytesIO()
+                if count_banco > 0:
+                    with zipfile.ZipFile(zip_eq_banco_io, "w", zipfile.ZIP_DEFLATED) as zipf:
+                        zipf.writestr("Documentos_Equivalentes_Aprobados.pdf", get_pdf_bytes(pdf_eq_banco))
+                        excel_io = io.BytesIO(); wb_eq_banco.save(excel_io); excel_io.seek(0)
+                        zipf.writestr("Documentos_Equivalentes_Excel.xlsx", excel_io.read())
+                zip_eq_banco_io.seek(0)
                 
                 df_banco = pd.DataFrame(pagos_procesados_banco)
                 texto_banco = generar_txt_banco(df_banco) if len(df_banco) > 0 else "SIN REGISTROS VALIDOS PARA EL BANCO"
                 
                 mensaje_carga.empty() 
-                st.success(f"✅ ¡Éxito! **{len(df_banco)}** pagos se integraron al archivo plano del banco exitosamente.")
-                
-                if nuevos_detectados:
-                    st.error("🚨 **ATENCIÓN - PERSONAL NUEVO DETECTADO**\n\nEl sistema excluyó del banco a estas personas porque su estado es 'NUEVO'. Sus PDFs sí fueron generados. **Pásale esta lista a Don José:**\n* " + "\n* ".join(nuevos_detectados))
-                
-                if ceros_detectados:
-                    st.warning("⚠️ **SALDOS EN CERO**\n\nLas siguientes personas quedaron debiendo o en $0 después de anticipos/ARL. No entraron al banco pero sus PDFs sí se crearon para contabilización:\n* " + "\n* ".join(ceros_detectados))
+                st.success(f"✅ ¡Éxito! Procesamiento finalizado. **{count_banco}** pagos aprobados listos para pago en banco.")
+                st.divider()
 
-                st.markdown("### 📥 Descargas Corporativas Independientes")
+                # BLOQUE PARA DOÑA YESENIA: BOTONES EXCLUSIVOS PARA NUEVOS
+                if count_nuevos > 0:
+                    # Crear el Excel dinámico de personal nuevo
+                    df_nuevos = pd.DataFrame([{
+                        'NOMBRES Y APELLIDOS': d['nombre_prestador'], 
+                        'CÉDULA': d['cedula_prestador'], 
+                        'BANCO': d['banco'], 
+                        'TIPO CUENTA': d['tipo_cuenta'], 
+                        'NO. CUENTA': d['num_cuenta']
+                    } for d in nuevos_detectados])
+                    
+                    excel_nuevos_io = io.BytesIO()
+                    df_nuevos.to_excel(excel_nuevos_io, index=False, sheet_name="PERSONAL NUEVO")
+                    excel_nuevos_io.seek(0)
+
+                    st.error(f"🚨 **ATENCIÓN - SE DETECTARON {count_nuevos} PERSONAS NUEVAS**\n\nFueron excluidos del archivo plano bancario, pero sus soportes contables se generaron de forma independiente. Utiliza estos botones para descargar su información:")
+                    
+                    colN1, colN2, colN3 = st.columns(3)
+                    colN1.download_button("1️⃣ 📥 Listado Excel (Para Don José)", data=excel_nuevos_io, file_name="Listado_Nuevos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                    colN2.download_button("2️⃣ 📥 Cuentas de Cobro (Solo Nuevos)", data=get_pdf_bytes(pdf_ct_nuevos), file_name="Cuentas_Cobro_Nuevos.pdf", mime="application/pdf", use_container_width=True)
+                    
+                    zip_eq_nuevos_io = io.BytesIO()
+                    with zipfile.ZipFile(zip_eq_nuevos_io, "w", zipfile.ZIP_DEFLATED) as zipf:
+                        zipf.writestr("Docs_Equivalentes_Nuevos.pdf", get_pdf_bytes(pdf_eq_nuevos))
+                        excel_io = io.BytesIO(); wb_eq_nuevos.save(excel_io); excel_io.seek(0)
+                        zipf.writestr("Docs_Equivalentes_Nuevos_Excel.xlsx", excel_io.read())
+                    zip_eq_nuevos_io.seek(0)
+                    colN3.download_button("3️⃣ 📥 Docs Equivalentes (Solo Nuevos)", data=zip_eq_nuevos_io, file_name="Docs_Equivalentes_Nuevos.zip", mime="application/zip", use_container_width=True)
+                    st.divider()
+                
+                # BLOQUE PARA DOÑA YESENIA: BOTONES EXCLUSIVOS PARA SALDOS EN CERO
+                if count_ceros > 0:
+                    nombres_ceros = "\n* ".join([f"👤 {d['nombre_prestador']} (C.C: {d['cedula_prestador']})" for d in ceros_detectados])
+                    st.warning(f"⚠️ **SE DETECTARON {count_ceros} SALDOS EN CERO O NEGATIVOS**\n\nPersonas con deducciones totales por anticipos o ARL. Fueron excluidos del archivo plano, pero puedes descargar sus soportes aquí para contabilizar el cruce de los anticipos:\n* {nombres_ceros}")
+                    
+                    colC1, colC2 = st.columns(2)
+                    colC1.download_button("1️⃣ 📥 Cuentas de Cobro (Saldos Cero)", data=get_pdf_bytes(pdf_ct_ceros), file_name="Cuentas_Cobro_Ceros.pdf", mime="application/pdf", use_container_width=True)
+                    
+                    zip_eq_ceros_io = io.BytesIO()
+                    with zipfile.ZipFile(zip_eq_ceros_io, "w", zipfile.ZIP_DEFLATED) as zipf:
+                        zipf.writestr("Docs_Equivalentes_Ceros.pdf", get_pdf_bytes(pdf_eq_ceros))
+                        excel_io = io.BytesIO(); wb_eq_ceros.save(excel_io); excel_io.seek(0)
+                        zipf.writestr("Docs_Equivalentes_Ceros_Excel.xlsx", excel_io.read())
+                    zip_eq_ceros_io.seek(0)
+                    colC2.download_button("2️⃣ 📥 Docs Equivalentes (Saldos Cero)", data=zip_eq_ceros_io, file_name="Docs_Equivalentes_Ceros.zip", mime="application/zip", use_container_width=True)
+                    st.divider()
+
+                # DESCARGAS GENERALES (PERSONAL APROBADO)
+                st.markdown(f"### 📥 Soportes Contables Aprobados (Los {count_banco} del Banco)")
                 colD1, colD2, colD3 = st.columns(3)
                 
                 colD1.download_button(
-                    label="1️⃣ Cuentas de Cobro (.ZIP)",
-                    data=zip_cuentas_io,
-                    file_name=f"Cuentas_Cobro_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip",
+                    label="1️⃣ Soportes: Cuentas de Cobro (.ZIP)",
+                    data=zip_cuentas_banco_io,
+                    file_name=f"Cuentas_Cobro_Aprobadas_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip",
                     mime="application/zip",
-                    use_container_width=True
+                    use_container_width=True,
+                    disabled=(count_banco == 0)
                 )
                 
                 colD2.download_button(
-                    label="2️⃣ Docs. Equivalentes (.ZIP)",
-                    data=zip_eq_io,
-                    file_name=f"Docs_Equivalentes_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip",
+                    label="2️⃣ Soportes: Docs. Equivalentes (.ZIP)",
+                    data=zip_eq_banco_io,
+                    file_name=f"Docs_Equivalentes_Aprobados_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip",
                     mime="application/zip",
-                    use_container_width=True
+                    use_container_width=True,
+                    disabled=(count_banco == 0)
                 )
                 
                 colD3.download_button(
@@ -1081,7 +1141,7 @@ else:
                     file_name=f"Plano_Banco_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.txt",
                     mime="text/plain",
                     use_container_width=True,
-                    disabled=(len(df_banco) == 0)
+                    disabled=(count_banco == 0)
                 )
 
             except Exception as e:
