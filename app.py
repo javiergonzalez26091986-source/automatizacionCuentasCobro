@@ -638,12 +638,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
 
         ingreso_neto_esperado = limpiar_dinero(row.get('TOTAL A PAGAR', 0))
         nombre_conductor = str(row.get('CONDUCTOR', '')).strip().upper()
-        
-        # AHORA NO DESCARTAMOS LOS $0 DIRECTAMENTE. 
-        # Solo descartamos si es un registro totalmente en blanco o erróneo (sin nombre).
-        # Esto permite procesar a las personas que tienen Total 0 pero tienen anticipos (Ej: Jilmer)
-        if ingreso_neto_esperado <= 0 and not nombre_conductor:
-            continue
 
         ciudad = str(row.get('CIUDAD', '')).upper().strip()
         cedula_conductor = str(row.get('CÉDULA', row.get('CEDULA', ''))).strip()
@@ -697,13 +691,14 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
         neto_total_conductor = ingreso_bruto_total - retefuente - ica
         neto_solo_horas = neto_total_conductor - fuera_perimetro_neto
 
-        conductores.append({
-            'nombre_conductor': nombre_conductor,
-            'cedula_conductor': cedula_conductor,
-            'horas': horas,
-            'ingreso_base': ingreso_base_bruta,
-            'neto_pagar': neto_solo_horas
-        })
+        if ingreso_neto_esperado > 0 or nombre_conductor != "":
+            conductores.append({
+                'nombre_conductor': nombre_conductor if nombre_conductor else nombre_prestador,
+                'cedula_conductor': cedula_conductor if cedula_conductor else cedula_prestador,
+                'horas': horas,
+                'ingreso_base': ingreso_base_bruta,
+                'neto_pagar': neto_solo_horas
+            })
 
         suma_neto += neto_total_conductor
         suma_bruto += ingreso_bruto_total
@@ -711,7 +706,15 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
         suma_ica += ica
         suma_horas += horas
 
-    if not conductores: return None
+    # Fix Jilmer: Si por error en el Excel la fila quedó vacía, forzamos su registro para que no se pierda.
+    if not conductores: 
+        conductores.append({
+            'nombre_conductor': nombre_prestador,
+            'cedula_conductor': cedula_prestador,
+            'horas': suma_horas if suma_horas > 0 else 1.0,
+            'ingreso_base': 0,
+            'neto_pagar': 0
+        })
 
     neto_final = suma_neto - suma_anticipos - suma_otros_desc
 
@@ -942,7 +945,7 @@ else:
             else:
                 st.markdown(f"### Resumen Financiero: {calculos['nombre_prestador']}")
                 if calculos['es_nuevo']:
-                    st.error("🚨 **ESTADO NUEVO DETECTADO:** Este usuario se generará en PDF para control, pero **se omitirá del archivo plano del banco** para que Don José cree su cuenta primero.")
+                    st.info("👤 **ESTADO NUEVO DETECTADO:** Esta persona se incluirá en el Excel de nuevos para Don José.")
                 
                 cA, cB, cC, cD = st.columns(4)
                 cA.markdown(f"<div class='metric-box'><b>BASE BRUTA</b><br>${calculos['ingreso_base']:,.0f}</div>", unsafe_allow_html=True)
@@ -985,9 +988,6 @@ else:
                 pdf_ct_banco = FPDF(); pdf_eq_banco = FPDF()
                 wb_eq_banco = openpyxl.Workbook(); wb_eq_banco.remove(wb_eq_banco.active)
                 
-                pdf_ct_nuevos = FPDF(); pdf_eq_nuevos = FPDF()
-                wb_eq_nuevos = openpyxl.Workbook(); wb_eq_nuevos.remove(wb_eq_nuevos.active)
-                
                 pdf_ct_ceros = FPDF(); pdf_eq_ceros = FPDF()
                 wb_eq_ceros = openpyxl.Workbook(); wb_eq_ceros.remove(wb_eq_ceros.active)
                 
@@ -1008,15 +1008,13 @@ else:
                     nombre_pestana = f"{contador}_{datos_doc['nombre_prestador'][:20]}".replace(":", "").replace("/", "-")
 
                     # DISTRIBUCIÓN INTELIGENTE SEGÚN REQUERIMIENTOS
+                    # 1. Si es nuevo, va a la lista de Excel informativo para Don José
                     if datos_doc['es_nuevo']:
-                        agregar_pagina_pdf_cuenta_cobro(pdf_ct_nuevos, datos_doc)
-                        agregar_pagina_pdf_doc_equivalente(pdf_eq_nuevos, datos_doc)
-                        ws = wb_eq_nuevos.create_sheet(title=nombre_pestana)
-                        construir_hoja_documento_equivalente_excel(ws, datos_doc)
                         nuevos_detectados.append(datos_doc)
                         count_nuevos += 1
                         
-                    elif datos_doc['neto_final'] <= 0:
+                    # 2. SEPARACIÓN EXCLUYENTE: ¿Saldo cero o Aprobado para el banco?
+                    if datos_doc['neto_final'] <= 0:
                         agregar_pagina_pdf_cuenta_cobro(pdf_ct_ceros, datos_doc)
                         agregar_pagina_pdf_doc_equivalente(pdf_eq_ceros, datos_doc)
                         ws = wb_eq_ceros.create_sheet(title=nombre_pestana)
@@ -1066,9 +1064,8 @@ else:
                 st.success(f"✅ ¡Éxito! Procesamiento finalizado. **{count_banco}** pagos aprobados listos para pago en banco.")
                 st.divider()
 
-                # BLOQUE PARA DOÑA YESENIA: BOTONES EXCLUSIVOS PARA NUEVOS
+                # BLOQUE PARA DOÑA YESENIA: BOTÓN EXCLUSIVO EXCEL PARA NUEVOS
                 if count_nuevos > 0:
-                    # Crear el Excel dinámico de personal nuevo
                     df_nuevos = pd.DataFrame([{
                         'NOMBRES Y APELLIDOS': d['nombre_prestador'], 
                         'CÉDULA': d['cedula_prestador'], 
@@ -1081,19 +1078,8 @@ else:
                     df_nuevos.to_excel(excel_nuevos_io, index=False, sheet_name="PERSONAL NUEVO")
                     excel_nuevos_io.seek(0)
 
-                    st.error(f"🚨 **ATENCIÓN - SE DETECTARON {count_nuevos} PERSONAS NUEVAS**\n\nFueron excluidos del archivo plano bancario, pero sus soportes contables se generaron de forma independiente. Utiliza estos botones para descargar su información:")
-                    
-                    colN1, colN2, colN3 = st.columns(3)
-                    colN1.download_button("1️⃣ 📥 Listado Excel (Para Don José)", data=excel_nuevos_io, file_name="Listado_Nuevos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                    colN2.download_button("2️⃣ 📥 Cuentas de Cobro (Solo Nuevos)", data=get_pdf_bytes(pdf_ct_nuevos), file_name="Cuentas_Cobro_Nuevos.pdf", mime="application/pdf", use_container_width=True)
-                    
-                    zip_eq_nuevos_io = io.BytesIO()
-                    with zipfile.ZipFile(zip_eq_nuevos_io, "w", zipfile.ZIP_DEFLATED) as zipf:
-                        zipf.writestr("Docs_Equivalentes_Nuevos.pdf", get_pdf_bytes(pdf_eq_nuevos))
-                        excel_io = io.BytesIO(); wb_eq_nuevos.save(excel_io); excel_io.seek(0)
-                        zipf.writestr("Docs_Equivalentes_Nuevos_Excel.xlsx", excel_io.read())
-                    zip_eq_nuevos_io.seek(0)
-                    colN3.download_button("3️⃣ 📥 Docs Equivalentes (Solo Nuevos)", data=zip_eq_nuevos_io, file_name="Docs_Equivalentes_Nuevos.zip", mime="application/zip", use_container_width=True)
+                    st.info(f"👤 **SE DETECTARON {count_nuevos} PERSONAS NUEVAS**\n\nSe incluyeron normalmente en el archivo del banco o en los saldos en cero (según corresponda), pero aquí tienes el listado exclusivo en Excel para enviárselo a Don José:")
+                    st.download_button("1️⃣ 📥 Listado Excel (Para Don José)", data=excel_nuevos_io, file_name="Listado_Nuevos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                     st.divider()
                 
                 # BLOQUE PARA DOÑA YESENIA: BOTONES EXCLUSIVOS PARA SALDOS EN CERO
