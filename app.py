@@ -1078,7 +1078,7 @@ else:
                     df_nuevos.to_excel(excel_nuevos_io, index=False, sheet_name="PERSONAL NUEVO")
                     excel_nuevos_io.seek(0)
 
-                    st.info(f"👤 **SE DETECTARON {count_nuevos} PERSONAS NUEVAS**\n\nSe incluyeron normalmente en el archivo del banco o en los saldos en cero (según corresponda), pero aquí tienes el listado exclusivo en Excel para enviárselo a Don José:")
+                    st.info(f"👤 **SE DETECTARON {count_nuevos} PERSONAS NUEVAS**\n\nSe incluyeron normalmente en el archivo del banco o en los saldos en cero (según corresponda), pero aqcá se encuentra el listado exclusivo en Excel para enviárselo a Don José:")
                     st.download_button("1️⃣ 📥 Listado Excel (Para Don José)", data=excel_nuevos_io, file_name="Listado_Nuevos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                     st.divider()
                 
