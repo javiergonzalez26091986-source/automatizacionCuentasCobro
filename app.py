@@ -804,7 +804,6 @@ if not cortes_disponibles:
 
 st.divider()
 
-# SOLUCIÓN: Selector de corte GLOBAL (Aplica a todas las pestañas para que no colapsen)
 corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar / visualizar:", cortes_disponibles)
 df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado]
 
@@ -956,7 +955,6 @@ with tab_generador:
                     if calculos['neto_final'] <= 0: st.warning("⚠️ El total a consignar da **$0 o negativo**.")
 
                 datos_doc = calculos.copy()
-                # SOLUCIÓN DEL PREVIEW: Dejamos el ID vacío para que salga limpio
                 datos_doc.update({'id': "", 'fecha_emision': obtener_fecha_actual(), 'corte_fechas': corte_seleccionado})
                 
                 pdf_ct = FPDF(); agregar_pagina_pdf_cuenta_cobro(pdf_ct, datos_doc)
@@ -1084,7 +1082,7 @@ with tab_generador:
                     st.error(f"Error en el proceso: {e}")
 
 # ==============================================================================
-# PESTAÑA 2: PANEL DE INFORMES GERENCIALES CON GRÁFICOS (SOLUCIÓN AUDIO 4)
+# PESTAÑA 2: PANEL DE INFORMES GERENCIALES CON GRÁFICOS Y TABLAS (NUEVO DISEÑO)
 # ==============================================================================
 with tab_informes:
     st.markdown(f"### 📊 Informe Gerencial - Corte: {corte_seleccionado}")
@@ -1106,56 +1104,123 @@ with tab_informes:
         c4.metric("Valor Total Quincena", f"${total_consignar:,.0f}")
         
         st.divider()
-        st.markdown("### 📈 Análisis Gráfico Interactivo")
-        graf1, graf2 = st.columns(2)
+        st.markdown("### 📈 Análisis Financiero Detallado")
         
-        # Gráfico 1: Pagos por Cliente
-        col_cliente = obtener_nombre_columna(df_informe, ['CLIENTE', 'EMPRESA'])
-        if col_cliente:
-            informe_cliente_graf = df_informe.groupby(col_cliente)['Valor Numérico'].sum().reset_index()
-            fig_cliente = px.bar(
-                informe_cliente_graf, 
-                x=col_cliente, 
-                y='Valor Numérico', 
-                title="Total a Pagar por Cliente",
-                text_auto='.2s',
-                color='Valor Numérico',
-                color_continuous_scale='Reds'
-            )
-            fig_cliente.update_layout(xaxis_title="Cliente", yaxis_title="Total ($)")
-            graf1.plotly_chart(fig_cliente, use_container_width=True)
-            
-        # Gráfico 2: Distribución de Banco
-        col_banco_graf = obtener_nombre_columna(df_informe, ['BANCO', 'BANCO DESTINO'])
-        if col_banco_graf:
-            df_bancos_pie = df_informe.groupby(col_banco_graf)['Valor Numérico'].sum().reset_index()
-            fig_banco = px.pie(
-                df_bancos_pie, 
-                names=col_banco_graf, 
-                values='Valor Numérico', 
-                title="Distribución de Dinero por Banco",
-                hole=0.4,
-                color_discrete_sequence=px.colors.sequential.Reds_r
-            )
-            graf2.plotly_chart(fig_banco, use_container_width=True)
-            
-        st.divider()
+        # Pestañas Internas para organizar visualmente y no saturar
+        t_cli, t_ban, t_con = st.tabs(["🏢 Consolidado por Cliente", "🏦 Distribución Bancaria", "🛵 Análisis de Conductores"])
         
-        # Gráfico 3: Top 10 Conductores
-        col_cond = obtener_nombre_columna(df_informe, ['CONDUCTOR', 'NOMBRES'])
-        if col_cond:
-            st.markdown("#### 👤 Top 10 Conductores con Mayor Pago")
-            informe_cond_graf = df_informe.groupby(col_cond)['Valor Numérico'].sum().reset_index()
-            informe_cond_graf = informe_cond_graf.sort_values('Valor Numérico', ascending=False).head(10)
+        # 1. MÓDULO POR CLIENTE
+        with t_cli:
+            st.markdown("#### 📊 Inversión y Facturación por Cliente")
+            col_cliente = obtener_nombre_columna(df_informe, ['CLIENTE', 'EMPRESA'])
+            if col_cliente:
+                df_cli = df_informe.groupby(col_cliente)['Valor Numérico'].sum().reset_index()
+                df_cli = df_cli.sort_values('Valor Numérico', ascending=True) # Ascendente para que el gráfico de barras horizontales quede de mayor a menor de arriba hacia abajo
+                
+                cc1, cc2 = st.columns([3, 2])
+                
+                with cc1:
+                    fig_cliente = px.bar(
+                        df_cli, 
+                        x='Valor Numérico', 
+                        y=col_cliente, 
+                        orientation='h',
+                        title="Distribución Total a Pagar por Cliente",
+                        text_auto='$.3s', # Formato abreviado de dinero
+                        color='Valor Numérico',
+                        color_continuous_scale='Reds'
+                    )
+                    fig_cliente.update_layout(showlegend=False, xaxis_title="Total a Pagar ($)", yaxis_title="")
+                    st.plotly_chart(fig_cliente, use_container_width=True)
+                
+                with cc2:
+                    st.markdown("**📋 Tabla Detallada Exacta**")
+                    df_cli_table = df_cli.sort_values('Valor Numérico', ascending=False).rename(columns={col_cliente: "Cliente", "Valor Numérico": "Total a Pagar"})
+                    st.dataframe(
+                        df_cli_table.style.format({"Total a Pagar": "${:,.0f}"}),
+                        hide_index=True,
+                        use_container_width=True
+                    )
+        
+        # 2. MÓDULO BANCARIO
+        with t_ban:
+            st.markdown("#### 🏦 Distribución de Fondos por Entidad Bancaria")
+            col_banco_graf = obtener_nombre_columna(df_informe, ['BANCO', 'BANCO DESTINO'])
+            if col_banco_graf:
+                # Agrupamos sumando dinero y contando número de cuentas a transferir
+                df_ban = df_informe.groupby(col_banco_graf).agg(
+                    Cuentas=(col_banco_graf, 'count'),
+                    Total=('Valor Numérico', 'sum')
+                ).reset_index().sort_values('Total', ascending=False)
+                
+                cb1, cb2 = st.columns([3, 2])
+                
+                with cb1:
+                    fig_banco = px.pie(
+                        df_ban, 
+                        names=col_banco_graf, 
+                        values='Total', 
+                        title="Porcentaje de Dinero Concentrado por Banco",
+                        hole=0.45,
+                        color_discrete_sequence=px.colors.sequential.Reds_r
+                    )
+                    fig_banco.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_banco.update_layout(showlegend=False)
+                    st.plotly_chart(fig_banco, use_container_width=True)
+                    
+                with cb2:
+                    st.markdown("**📋 Directorio de Transferencias Bancarias**")
+                    df_ban_table = df_ban.rename(columns={col_banco_graf: "Entidad Bancaria", "Cuentas": "Cant. Transferencias", "Total": "Dinero a Girar"})
+                    st.dataframe(
+                        df_ban_table.style.format({"Dinero a Girar": "${:,.0f}"}),
+                        hide_index=True,
+                        use_container_width=True
+                    )
+
+        # 3. MÓDULO POR CONDUCTOR
+        with t_con:
+            st.markdown("#### 🛵 Top 15 de Conductores con Mayor Volumen de Pago")
+            col_cond = obtener_nombre_columna(df_informe, ['CONDUCTOR', 'NOMBRES'])
+            col_horas = obtener_nombre_columna(df_informe, ['NÚMERO DE HORAS', 'NUMERO DE HORAS', 'HORAS'])
             
-            fig_cond = px.bar(
-                informe_cond_graf, 
-                x='Valor Numérico', 
-                y=col_cond, 
-                orientation='h',
-                text_auto='.2s',
-                color='Valor Numérico',
-                color_continuous_scale='Reds'
-            )
-            fig_cond.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Total ($)", yaxis_title="Conductor")
-            st.plotly_chart(fig_cond, use_container_width=True)
+            if col_cond:
+                agg_dict_cond = {'Valor Numérico': 'sum'}
+                if col_horas: agg_dict_cond[col_horas] = 'sum'
+                
+                df_cond = df_informe.groupby(col_cond).agg(agg_dict_cond).reset_index()
+                # Extraemos el top 15 y lo ordenamos ascendente para Plotly Horizontal
+                df_cond_top = df_cond.sort_values('Valor Numérico', ascending=False).head(15).sort_values('Valor Numérico', ascending=True)
+                
+                c_c1, c_c2 = st.columns([3, 2])
+                
+                with c_c1:
+                    fig_cond = px.bar(
+                        df_cond_top, 
+                        x='Valor Numérico', 
+                        y=col_cond, 
+                        orientation='h',
+                        title="Top 15 - Liquidación por Conductor",
+                        text_auto='$.3s',
+                        color='Valor Numérico',
+                        color_continuous_scale='Reds'
+                    )
+                    fig_cond.update_layout(showlegend=False, xaxis_title="Total a Pagar ($)", yaxis_title="")
+                    st.plotly_chart(fig_cond, use_container_width=True)
+                
+                with c_c2:
+                    st.markdown(f"**📋 Directorio Completo (Todos los {len(df_cond)} Conductores)**")
+                    df_cond_table = df_cond.sort_values('Valor Numérico', ascending=False)
+                    
+                    rename_dict = {col_cond: "Conductor", "Valor Numérico": "Total a Pagar"}
+                    if col_horas: rename_dict[col_horas] = "Horas Facturadas"
+                    df_cond_table = df_cond_table.rename(columns=rename_dict)
+                    
+                    format_dict = {"Total a Pagar": "${:,.0f}"}
+                    if "Horas Facturadas" in df_cond_table.columns: format_dict["Horas Facturadas"] = "{:,.1f}"
+                    
+                    st.dataframe(
+                        df_cond_table.style.format(format_dict),
+                        hide_index=True,
+                        use_container_width=True,
+                        height=400 # Hace la tabla scrolleable hacia abajo
+                    )
