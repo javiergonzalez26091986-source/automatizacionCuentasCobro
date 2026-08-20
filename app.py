@@ -150,7 +150,10 @@ def generar_txt_banco(df_banco):
         cedula = cedula.zfill(15)[:15]
         nombre = str(row['NOMBRE_BENEFICIARIO']).upper().ljust(30)[:30]
         banco = "005600078" 
-        cuenta = str(row['NUMERO_CUENTA']).replace("'", "").strip().ljust(18)[:18]
+        
+        # AQUÍ ESTÁ LA MAGIA: Se eliminan guiones y espacios en blanco del número de cuenta
+        cuenta = str(row['NUMERO_CUENTA']).replace("'", "").replace("-", "").replace(" ", "").strip().ljust(18)[:18]
+        
         tipo_cta = "37" if "AHORRO" in str(row['TIPO_CUENTA']).upper() else "27"
         valor = int(row['VALOR_NETO_A_PAGAR'] * 100)
         valor_str = f"{valor:017d}"
@@ -706,7 +709,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
         suma_ica += ica
         suma_horas += horas
 
-    # Fix Jilmer: Si por error en el Excel la fila quedó vacía, forzamos su registro para que no se pierda.
+    # Garantizar que nadie con $0 (como Jilmer) sea descartado por error de fila vacía
     if not conductores: 
         conductores.append({
             'nombre_conductor': nombre_prestador,
@@ -945,7 +948,7 @@ else:
             else:
                 st.markdown(f"### Resumen Financiero: {calculos['nombre_prestador']}")
                 if calculos['es_nuevo']:
-                    st.info("👤 **ESTADO NUEVO DETECTADO:** Esta persona se incluirá en el Excel de nuevos para Don José.")
+                    st.info("👤 **ESTADO NUEVO DETECTADO:** Esta persona se incluirá en el paquete exclusivo de nuevos.")
                 
                 cA, cB, cC, cD = st.columns(4)
                 cA.markdown(f"<div class='metric-box'><b>BASE BRUTA</b><br>${calculos['ingreso_base']:,.0f}</div>", unsafe_allow_html=True)
@@ -988,6 +991,9 @@ else:
                 pdf_ct_banco = FPDF(); pdf_eq_banco = FPDF()
                 wb_eq_banco = openpyxl.Workbook(); wb_eq_banco.remove(wb_eq_banco.active)
                 
+                pdf_ct_nuevos = FPDF(); pdf_eq_nuevos = FPDF()
+                wb_eq_nuevos = openpyxl.Workbook(); wb_eq_nuevos.remove(wb_eq_nuevos.active)
+                
                 pdf_ct_ceros = FPDF(); pdf_eq_ceros = FPDF()
                 wb_eq_ceros = openpyxl.Workbook(); wb_eq_ceros.remove(wb_eq_ceros.active)
                 
@@ -1007,13 +1013,16 @@ else:
                     datos_doc.update({'id': str(contador).zfill(3), 'fecha_emision': fecha_actual, 'corte_fechas': corte_seleccionado})
                     nombre_pestana = f"{contador}_{datos_doc['nombre_prestador'][:20]}".replace(":", "").replace("/", "-")
 
-                    # DISTRIBUCIÓN INTELIGENTE SEGÚN REQUERIMIENTOS
-                    # 1. Si es nuevo, va a la lista de Excel informativo para Don José
+                    # 1. SI ES NUEVO: Se compila en su paquete exclusivo de Nuevos (PDFs + Excel)
                     if datos_doc['es_nuevo']:
+                        agregar_pagina_pdf_cuenta_cobro(pdf_ct_nuevos, datos_doc)
+                        agregar_pagina_pdf_doc_equivalente(pdf_eq_nuevos, datos_doc)
+                        ws = wb_eq_nuevos.create_sheet(title=nombre_pestana)
+                        construir_hoja_documento_equivalente_excel(ws, datos_doc)
                         nuevos_detectados.append(datos_doc)
                         count_nuevos += 1
-                        
-                    # 2. SEPARACIÓN EXCLUYENTE: ¿Saldo cero o Aprobado para el banco?
+
+                    # 2. CLASIFICACIÓN FINANCIERA (SALDO CERO VS BANCO)
                     if datos_doc['neto_final'] <= 0:
                         agregar_pagina_pdf_cuenta_cobro(pdf_ct_ceros, datos_doc)
                         agregar_pagina_pdf_doc_equivalente(pdf_eq_ceros, datos_doc)
@@ -1023,6 +1032,7 @@ else:
                         count_ceros += 1
                         
                     else:
+                        # ENTRA AL ARCHIVO Y PLANO BANCARIO (Incluye nuevos con saldo positivo para dar exactamente 63)
                         agregar_pagina_pdf_cuenta_cobro(pdf_ct_banco, datos_doc)
                         agregar_pagina_pdf_doc_equivalente(pdf_eq_banco, datos_doc)
                         ws = wb_eq_banco.create_sheet(title=nombre_pestana)
@@ -1064,7 +1074,7 @@ else:
                 st.success(f"✅ ¡Éxito! Procesamiento finalizado. **{count_banco}** pagos aprobados listos para pago en banco.")
                 st.divider()
 
-                # BLOQUE PARA DOÑA YESENIA: BOTÓN EXCLUSIVO EXCEL PARA NUEVOS
+                # BLOQUE RESTAURADO PARA DOÑA YESENIA: LOS 3 BOTONES DE NUEVOS
                 if count_nuevos > 0:
                     df_nuevos = pd.DataFrame([{
                         'NOMBRES Y APELLIDOS': d['nombre_prestador'], 
@@ -1078,8 +1088,19 @@ else:
                     df_nuevos.to_excel(excel_nuevos_io, index=False, sheet_name="PERSONAL NUEVO")
                     excel_nuevos_io.seek(0)
 
-                    st.info(f"👤 **SE DETECTARON {count_nuevos} PERSONAS NUEVAS**\n\nSe incluyeron normalmente en el archivo del banco o en los saldos en cero (según corresponda), pero aqcá se encuentra el listado exclusivo en Excel para enviárselo a Don José:")
-                    st.download_button("1️⃣ 📥 Listado Excel (Para Don José)", data=excel_nuevos_io, file_name="Listado_Nuevos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    st.error(f"🚨 **ATENCIÓN - SE DETECTARON {count_nuevos} PERSONAS NUEVAS**\n\nSus soportes contables se generaron de forma independiente y también se compiló su listado para Don José. Utiliza estos botones para descargar su información:")
+                    
+                    colN1, colN2, colN3 = st.columns(3)
+                    colN1.download_button("1️⃣ 📥 Listado Excel (Para Don José)", data=excel_nuevos_io, file_name="Listado_Nuevos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                    colN2.download_button("2️⃣ 📥 Cuentas de Cobro (Solo Nuevos)", data=get_pdf_bytes(pdf_ct_nuevos), file_name="Cuentas_Cobro_Nuevos.pdf", mime="application/pdf", use_container_width=True)
+                    
+                    zip_eq_nuevos_io = io.BytesIO()
+                    with zipfile.ZipFile(zip_eq_nuevos_io, "w", zipfile.ZIP_DEFLATED) as zipf:
+                        zipf.writestr("Docs_Equivalentes_Nuevos.pdf", get_pdf_bytes(pdf_eq_nuevos))
+                        excel_io = io.BytesIO(); wb_eq_nuevos.save(excel_io); excel_io.seek(0)
+                        zipf.writestr("Docs_Equivalentes_Nuevos_Excel.xlsx", excel_io.read())
+                    zip_eq_nuevos_io.seek(0)
+                    colN3.download_button("3️⃣ 📥 Docs Equivalentes (Solo Nuevos)", data=zip_eq_nuevos_io, file_name="Docs_Equivalentes_Nuevos.zip", mime="application/zip", use_container_width=True)
                     st.divider()
                 
                 # BLOQUE PARA DOÑA YESENIA: BOTONES EXCLUSIVOS PARA SALDOS EN CERO
