@@ -121,14 +121,12 @@ def limpiar_texto(txt):
     if pd.isna(txt): return ""
     return re.sub(r'\s+', ' ', str(txt).upper().strip())
 
-# --- SOLUCIÓN ERROR DE HORAS (NÚMEROS GIGANTES) ---
 def obtener_horas(row):
     for col in ['HORAS', 'CANTIDAD DE HORAS', 'CANTIDAD HORAS', 'TOTAL HORAS', 'CANTIDAD', 'NUMERO DE HORAS']:
         if col in row.index:
             try:
                 val = float(row[col])
                 if not pd.isna(val):
-                    # Si detectamos un serial de fecha (ej. 46166), lo revertimos a decimal (Día.Mes)
                     if val >= 40000:
                         fecha_erronea = datetime(1899, 12, 30) + timedelta(days=int(val))
                         return float(f"{fecha_erronea.day}.{fecha_erronea.month}")
@@ -811,7 +809,11 @@ if not cortes_disponibles:
 st.divider()
 
 corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar / visualizar:", cortes_disponibles)
-df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado]
+df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado].copy()
+
+# --- PREPARACIÓN DE COLUMNAS CLAVE PARA LA NUEVA LÓGICA DE AGRUPACIÓN ---
+df_pagos_corte['_ced_prestador_clean'] = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(".0", "", regex=False).str.strip()
+df_pagos_corte['_ced_banco_clean'] = df_pagos_corte[col_cedula_banco].astype(str).str.replace(".0", "", regex=False).str.strip()
 
 tab_generador, tab_informes = st.tabs(["📄 Generador de Documentos", "📊 Panel de Informes Gerenciales"])
 
@@ -921,21 +923,20 @@ with tab_generador:
             st.info("💡 **Aviso Importante:** Se detectó a Milton Javier Cortes. Asegúrate de tener una columna llamada **CANTIDAD** en tu pestaña *FUERAS PERIMETRO /ADIC*.")
 
         if "Individual" in modo_trabajo:
-            temp_df = df_pagos_corte[[col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco]].copy()
-            temp_df = temp_df.fillna("SIN DATO") 
-            
-            titulares_unicos = temp_df.drop_duplicates(subset=[col_cedula_prestador])
+            # --- FIX INDIVIDUAL: Agrupación exacta por Prestador + Titular de Cuenta Bancaria ---
+            titulares_unicos = df_pagos_corte.drop_duplicates(subset=['_ced_prestador_clean', '_ced_banco_clean'])
             
             lista_opciones = []
             for _, row in titulares_unicos.iterrows():
-                lbl = f"{row[col_prestador]} (C.C: {row[col_cedula_prestador]}) 🏦 Pago a cuenta de CC: {row[col_cedula_banco]}"
+                if row['_ced_prestador_clean'] in ['nan', '', 'None']: continue
+                lbl = f"📄 Factura: {row[col_prestador]} (NIT: {row['_ced_prestador_clean']}) ➔ 🏦 Cuenta de Cobro a nombre de {row[col_titular_banco]} (CC: {row['_ced_banco_clean']})"
                 lista_opciones.append(lbl)
                 
             if "mostrar_preview" not in st.session_state:
                 st.session_state.mostrar_preview = False
                 st.session_state.titular_actual = ""
                 
-            opcion_seleccionada = st.selectbox("Busque o seleccione el prestador (titular de la cuenta de cobro):", sorted(lista_opciones))
+            opcion_seleccionada = st.selectbox("Seleccione el documento a previsualizar:", sorted(lista_opciones))
             
             if st.button("🔍 Calcular y Previsualizar"):
                 st.session_state.mostrar_preview = True
@@ -943,16 +944,20 @@ with tab_generador:
                 
             if st.session_state.mostrar_preview and st.session_state.titular_actual == opcion_seleccionada:
                 
-                match_cedula = re.search(r'\(C\.C:\s*(.*?)\)', opcion_seleccionada)
-                if match_cedula:
-                    ced_prestador_seleccionada = match_cedula.group(1).strip()
-                    grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_prestador].astype(str).str.replace(".0", "", regex=False).str.strip() == ced_prestador_seleccionada]
+                try:
+                    ced_prestador_seleccionada = opcion_seleccionada.split("(NIT: ")[1].split(")")[0].strip()
+                    ced_banco_seleccionada = opcion_seleccionada.split("(CC: ")[1].split(")")[0].strip()
+                    
+                    mask_prestador = df_pagos_corte['_ced_prestador_clean'] == ced_prestador_seleccionada
+                    mask_banco = df_pagos_corte['_ced_banco_clean'] == ced_banco_seleccionada
+                    
+                    grupo_titular = df_pagos_corte[mask_prestador & mask_banco]
                     calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco, col_estado, col_anticipos, col_otros_desc, col_valor_dia)
                     
                     if not calculos:
                         st.warning("Este titular tiene saldo neto en $0 para este corte sin anticipos reportados.")
                     else:
-                        st.markdown(f"### Resumen Financiero: {calculos['nombre_prestador']}")
+                        st.markdown(f"### Resumen Financiero: {calculos['nombre_prestador']} (Cuenta destino: {calculos['nombre_titular_banco']})")
                         if calculos['es_nuevo']: st.info("👤 **ESTADO NUEVO DETECTADO:** Esta persona se incluirá en el paquete exclusivo de nuevos.")
                         
                         cA, cB, cC, cD = st.columns(4)
@@ -973,6 +978,8 @@ with tab_generador:
                     colBtn1, colBtn2 = st.columns(2)
                     colBtn1.download_button("📥 Descargar Cuenta de Cobro (PDF)", data=get_pdf_bytes(pdf_ct), file_name=f"Cuenta_{calculos['cedula_prestador']}.pdf", mime="application/pdf", use_container_width=True)
                     colBtn2.download_button("📥 Descargar Doc. Equivalente (PDF)", data=get_pdf_bytes(pdf_eq), file_name=f"DocEq_{calculos['cedula_prestador']}.pdf", mime="application/pdf", use_container_width=True)
+                except Exception as ex:
+                    st.error(f"Error procesando los datos de esta persona: {ex}")
 
         elif "Masiva" in modo_trabajo:
             if st.button("🚀 Procesar Lote General", use_container_width=True, type="primary"):
@@ -994,13 +1001,14 @@ with tab_generador:
                     pdf_ct_ceros = FPDF(); pdf_eq_ceros = FPDF()
                     wb_eq_ceros = openpyxl.Workbook(); wb_eq_ceros.remove(wb_eq_ceros.active)
                     
-                    cedulas_prestador_unicas = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(".0", "", regex=False).str.strip().unique()
-                    cedulas_prestador_unicas = [c for c in cedulas_prestador_unicas if c != 'nan' and c != '']
+                    # --- FIX MASIVO: Agrupación separada por Prestador + Cuenta Bancaria de Destino ---
+                    grupos = df_pagos_corte.groupby(['_ced_prestador_clean', '_ced_banco_clean'])
                     
                     contador = 1
                     
-                    for ced_prestador in cedulas_prestador_unicas:
-                        grupo_titular = df_pagos_corte[df_pagos_corte[col_cedula_prestador].astype(str).str.replace(".0", "", regex=False).str.strip() == ced_prestador]
+                    for (ced_prestador, ced_banco), grupo_titular in grupos:
+                        if ced_prestador in ['nan', '', 'None']: continue
+                        
                         calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco, col_estado, col_anticipos, col_otros_desc, col_valor_dia)
                         
                         if not calculos: continue
@@ -1056,8 +1064,6 @@ with tab_generador:
                     st.divider()
 
                     if count_nuevos > 0:
-                        # --- FIX ARCHIVO EXCEL DE NUEVOS ---
-                        # Antes usaba d['nombre_prestador'], ahora usa el nombre y cédula del TITULAR DEL BANCO (columnas G)
                         df_nuevos = pd.DataFrame([{'NOMBRES Y APELLIDOS': d['nombre_titular_banco'], 'CÉDULA': d['cedula_titular_banco'], 'BANCO': d['banco'], 'TIPO CUENTA': d['tipo_cuenta'], 'NO. CUENTA': d['num_cuenta']} for d in nuevos_detectados])
                         excel_nuevos_io = io.BytesIO(); df_nuevos.to_excel(excel_nuevos_io, index=False, sheet_name="PERSONAL NUEVO"); excel_nuevos_io.seek(0)
                         st.error(f"🚨 **ATENCIÓN - SE DETECTARON {count_nuevos} PERSONAS NUEVAS**")
@@ -1079,7 +1085,7 @@ with tab_generador:
                         colC1.download_button("1️⃣ 📥 Cuentas de Cobro (Saldos Cero)", data=get_pdf_bytes(pdf_ct_ceros), file_name="Cuentas_Cobro_Ceros.pdf", mime="application/pdf", use_container_width=True)
                         zip_eq_ceros_io = io.BytesIO()
                         with zipfile.ZipFile(zip_eq_ceros_io, "w", zipfile.ZIP_DEFLATED) as zipf:
-                            zipf.writestr("Docs_Equivalentes_Ceros.pdf", get_pdf_bytes(pdf_eq_ceros)); excel_io = io.BytesIO(); wb_eq_ceros.save(excel_io); excel_io.seek(0)
+                            zipf.writestr("Docs_Equivalentes_Ceros.pdf", get_pdf_bytes(pdf_ct_ceros)); excel_io = io.BytesIO(); wb_eq_ceros.save(excel_io); excel_io.seek(0)
                             zipf.writestr("Docs_Equivalentes_Ceros_Excel.xlsx", excel_io.read())
                         zip_eq_ceros_io.seek(0)
                         colC2.download_button("2️⃣ 📥 Docs Equivalentes (Saldos Cero)", data=zip_eq_ceros_io, file_name="Docs_Equivalentes_Ceros.zip", mime="application/zip", use_container_width=True)
@@ -1111,12 +1117,18 @@ with tab_informes:
         if col_horas_inf:
             df_informe[col_horas_inf] = pd.to_numeric(df_informe[col_horas_inf], errors='coerce').fillna(0)
         
-        total_cuentas = len(df_informe[col_cedula_prestador].dropna().unique())
+        # --- FIX PANEL GERENCIAL: Conteo preciso basado en la combinación facturador + cuenta de destino ---
+        df_informe['_ced_prestador_clean'] = df_informe[col_cedula_prestador].astype(str).str.replace(".0", "", regex=False).str.strip()
+        df_informe['_ced_banco_clean'] = df_informe[col_cedula_banco].astype(str).str.replace(".0", "", regex=False).str.strip()
+        
+        valid_records = df_informe[df_informe['_ced_prestador_clean'].isin(['nan', '', 'None']) == False]
+        total_cuentas = len(valid_records.drop_duplicates(subset=['_ced_prestador_clean', '_ced_banco_clean']))
+        
         cuentas_cero = len(df_informe[df_informe['Valor Numérico'] <= 0])
         total_consignar = df_informe['Valor Numérico'].sum()
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Cuentas Emitidas", total_cuentas)
+        c1.metric("Total Documentos Emitidos", total_cuentas)
         c2.metric("Cuentas con Pago de $0", cuentas_cero)
         c3.metric("Cuentas Efectivas por Pagar", total_cuentas - cuentas_cero)
         c4.metric("Valor Total Quincena", f"${total_consignar:,.0f}")
