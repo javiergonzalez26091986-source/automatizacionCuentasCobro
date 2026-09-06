@@ -812,7 +812,6 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
             st.markdown("#### Detalle de Rentabilidad por Colaborador")
             df_show_emp = df_cruce[['_cedula_clean', 'NOMBRE_EMPLEADO', 'CATEGORIA_VEHICULO', 'TOTAL_COBRADO_LTSA', 'VALOR_PAGADO_NETO', 'RETENCION_ASUMIDA', 'UTILIDAD_REAL_NETA', 'MARGEN_REAL']].sort_values('UTILIDAD_REAL_NETA', ascending=False)
             
-            # --- CORRECCIÓN DEFINITIVA A PRUEBA DE FALLOS PARA EL STYLER ---
             styler_emp = df_show_emp.style.format(format_dict)
             try:
                 if hasattr(styler_emp, 'map'):
@@ -1420,12 +1419,14 @@ with tab_rentabilidad:
     with sub_ltsa:
         st.info("Sube el **Cuadro Validador Quincenal (Excel de Cobro a LTSA)** para cruzarlo automáticamente con las cuentas de cobro generadas en esta quincena y calcular la utilidad real por empleado.")
         archivo_ltsa = st.file_uploader("📥 Subir archivo Validador (LTSA)", type=["xlsx", "xls"], key="file_ltsa")
-        renderizar_modulo_rentabilidad(archivo_ltsa, 'REPORTE', "LTSA", "RENTABILIDAD_HISTORICA", df_pagos_reales, corte_seleccionado)
+        if archivo_ltsa is not None:
+            renderizar_modulo_rentabilidad(archivo_ltsa, 'REPORTE', "LTSA", "RENTABILIDAD_HISTORICA", df_pagos_reales, corte_seleccionado)
 
     with sub_pollos:
         st.info("Sube el **Cuadro Validador Quincenal (Excel de Pollos y Panadería)** para calcular la rentabilidad de la operación y registrarla en el histórico.")
         archivo_pollos = st.file_uploader("📥 Subir archivo Validador (POLLOS)", type=["xlsx", "xls"], key="file_pollos")
-        renderizar_modulo_rentabilidad(archivo_pollos, 'COBRO', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado)
+        if archivo_pollos is not None:
+            renderizar_modulo_rentabilidad(archivo_pollos, 'COBRO', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado)
 
     with sub_directo:
         st.info("Sube el **Listado de Personal Directo** para detectar el personal activo, extraer sus costos de nómina correspondientes y enviar el consolidado al histórico.")
@@ -1447,7 +1448,6 @@ with tab_rentabilidad:
                         
                     cedulas_directo = df_activos[col_id].astype(str).str.replace(".0", "", regex=False).str.strip().tolist()
                     
-                    # Filtramos solo la gente que cruzó
                     df_pagos_directo = df_pagos_reales[df_pagos_reales['_cedula_clean'].isin(cedulas_directo)].copy()
                     
                     tot_nomina = float(df_pagos_directo['VALOR_PAGADO_NETO'].sum())
