@@ -803,8 +803,8 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
             return
 
         df_cobro = df_cobro.dropna(subset=[col_ced_cobro])
-        # 3. Sanitización estricta de la cédula para cruce exacto (quitar puntos, comas, letras y espacios)
-        df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(r'\D', '', regex=True).str.strip()
+        # 3. Sanitización estricta de la cédula con control del .0 al final (Solución al fallo de cruce)
+        df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
         
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg({
@@ -968,8 +968,8 @@ corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar / visuali
 df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado].copy()
 
 # --- PREPARACIÓN DE COLUMNAS CLAVE CON SANITIZACIÓN ROBUSTA (Solución a emparejamientos fallidos) ---
-df_pagos_corte['_ced_prestador_clean'] = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(r'\D', '', regex=True).str.strip()
-df_pagos_corte['_ced_banco_clean'] = df_pagos_corte[col_cedula_banco].astype(str).str.replace(r'\D', '', regex=True).str.strip()
+df_pagos_corte['_ced_prestador_clean'] = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
+df_pagos_corte['_ced_banco_clean'] = df_pagos_corte[col_cedula_banco].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
 
 
 tab_generador, tab_informes, tab_rentabilidad = st.tabs([
@@ -1024,7 +1024,7 @@ with tab_generador:
                         
                         match = pd.DataFrame()
                         if col_ced_bd:
-                            ced_bd = df_bd_maestra[col_ced_bd].astype(str).str.replace(".0", "", regex=False).str.strip()
+                            ced_bd = df_bd_maestra[col_ced_bd].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                             ced_match = str(cc).replace(".0", "").strip()
                             match = df_bd_maestra[ced_bd == ced_match]
                         
@@ -1277,8 +1277,8 @@ with tab_informes:
             df_informe[col_horas_inf] = pd.to_numeric(df_informe[col_horas_inf], errors='coerce').fillna(0)
         
         # Limpieza estandarizada para cruces correctos en los gráficos
-        df_informe['_ced_prestador_clean'] = df_informe[col_cedula_prestador].astype(str).str.replace(r'\D', '', regex=True).str.strip()
-        df_informe['_ced_banco_clean'] = df_informe[col_cedula_banco].astype(str).str.replace(r'\D', '', regex=True).str.strip()
+        df_informe['_ced_prestador_clean'] = df_informe[col_cedula_prestador].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
+        df_informe['_ced_banco_clean'] = df_informe[col_cedula_banco].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         
         valid_records = df_informe[df_informe['_ced_prestador_clean'].isin(['nan', '', 'None']) == False]
         total_cuentas = len(valid_records.drop_duplicates(subset=['_ced_prestador_clean', '_ced_banco_clean']))
@@ -1482,7 +1482,7 @@ with tab_rentabilidad:
                         df_activos = df_directo 
                         
                     # Sanitización estricta de la cédula del archivo de Personal Directo para coincidir exacto
-                    cedulas_directo = df_activos[col_id].astype(str).str.replace(r'\D', '', regex=True).str.strip().tolist()
+                    cedulas_directo = df_activos[col_id].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip().tolist()
                     
                     df_pagos_directo = df_pagos_reales[df_pagos_reales['_cedula_clean'].isin(cedulas_directo)].copy()
                     
