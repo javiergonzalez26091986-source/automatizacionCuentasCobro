@@ -4,3 +4,4 @@ requests
 fpdf2
 openpyxl
 plotly
+xlrd
