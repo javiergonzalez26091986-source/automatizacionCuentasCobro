@@ -660,36 +660,46 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
         tasa_total_impuestos = porcentaje_retefuente + porcentaje_ica
 
         fuera_perimetro_neto = 0.0
-        if "MILTON" in nombre_conductor and not df_fuera.empty and nombre_conductor not in conductores_procesados_fpu:
-            conductores_procesados_fpu.add(nombre_conductor)
+        
+        # --- AQUÍ ESTÁ LA NUEVA LÓGICA DINÁMICA PARA CUALQUIER CONDUCTOR ---
+        if not df_fuera.empty and nombre_conductor != "" and nombre_conductor not in conductores_procesados_fpu:
+            # Buscamos la columna que indique el nombre del conductor en la pestaña FUERAS PERIMETRO
+            col_cond_fuera = obtener_nombre_columna(df_fuera, ['CONDUCTOR', 'NOMBRE', 'PRESTADOR', 'NOMBRES'])
             
-            col_dest = obtener_nombre_columna(df_fuera, ['FUERA PERIMETRO CEDI', 'DESTINO', 'CIUDAD', 'LUGAR'])
-            col_val = obtener_nombre_columna(df_fuera, ['VALOR', 'PRECIO'])
-            col_cant = obtener_nombre_columna(df_fuera, ['CANTIDAD', 'CANT'])
-            
-            if col_dest and col_val and col_cant:
-                for _, f_row in df_fuera.iterrows():
-                    try:
-                        cant = float(f_row.get(col_cant, 0))
-                        if cant > 0:
-                            destino = str(f_row.get(col_dest, ''))
-                            valor_uni_neto = limpiar_dinero(f_row.get(col_val, 0))
-                            tot_neto = cant * valor_uni_neto
-                            
-                            tot_bruto = round(tot_neto / (1 - tasa_total_impuestos))
-                            val_uni_bruto = round(valor_uni_neto / (1 - tasa_total_impuestos))
-                            
-                            fuera_perimetro_neto += tot_neto
-                            suma_fuera_bruto += tot_bruto
-                            
-                            fpu_items_doc.append({
-                                'destino': destino,
-                                'cantidad': cant,
-                                'valor_unitario': val_uni_bruto,
-                                'total': tot_bruto,
-                                'neto': tot_neto
-                            })
-                    except: pass
+            if col_cond_fuera:
+                # Filtramos las filas que le corresponden a este conductor en específico
+                df_fuera_cond = df_fuera[df_fuera[col_cond_fuera].astype(str).str.upper().str.contains(nombre_conductor, na=False, regex=False)]
+                
+                if not df_fuera_cond.empty:
+                    conductores_procesados_fpu.add(nombre_conductor)
+                    
+                    col_dest = obtener_nombre_columna(df_fuera_cond, ['FUERA PERIMETRO CEDI', 'DESTINO', 'CIUDAD', 'LUGAR'])
+                    col_val = obtener_nombre_columna(df_fuera_cond, ['VALOR', 'PRECIO'])
+                    col_cant = obtener_nombre_columna(df_fuera_cond, ['CANTIDAD', 'CANT'])
+                    
+                    if col_dest and col_val and col_cant:
+                        for _, f_row in df_fuera_cond.iterrows():
+                            try:
+                                cant = float(f_row.get(col_cant, 0))
+                                if cant > 0:
+                                    destino = str(f_row.get(col_dest, ''))
+                                    valor_uni_neto = limpiar_dinero(f_row.get(col_val, 0))
+                                    tot_neto = cant * valor_uni_neto
+                                    
+                                    tot_bruto = round(tot_neto / (1 - tasa_total_impuestos))
+                                    val_uni_bruto = round(valor_uni_neto / (1 - tasa_total_impuestos))
+                                    
+                                    fuera_perimetro_neto += tot_neto
+                                    suma_fuera_bruto += tot_bruto
+                                    
+                                    fpu_items_doc.append({
+                                        'destino': destino,
+                                        'cantidad': cant,
+                                        'valor_unitario': val_uni_bruto,
+                                        'total': tot_bruto,
+                                        'neto': tot_neto
+                                    })
+                            except: pass
 
         total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
 
@@ -1096,8 +1106,11 @@ with tab_generador:
                 st.error(f"Error procesando el archivo: {e}")
 
     else:
-        if df_pagos_corte['CONDUCTOR'].str.contains('MILTON', na=False).any():
-            st.info("💡 **Aviso Importante:** Se detectó a Milton Javier Cortes. Asegúrate de tener una columna llamada **CANTIDAD** en tu pestaña *FUERAS PERIMETRO /ADIC*.")
+        # Reemplazamos la advertencia estática de Milton por una advertencia dinámica
+        if not df_fuera.empty:
+            col_cond_fuera_test = obtener_nombre_columna(df_fuera, ['CONDUCTOR', 'NOMBRE', 'NOMBRES'])
+            if not col_cond_fuera_test:
+                st.warning("⚠️ **Aviso Importante:** No se detectó una columna llamada 'CONDUCTOR' en la pestaña *FUERAS PERIMETRO /ADIC*. El sistema no podrá cruzar los viáticos si no agregas esa columna indicando a quién le corresponde cada pago.")
 
         if "Individual" in modo_trabajo:
             titulares_unicos = df_pagos_corte.drop_duplicates(subset=['_ced_prestador_clean', '_ced_banco_clean'])
