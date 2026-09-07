@@ -1501,7 +1501,7 @@ with tab_rentabilidad:
                     # AQUÍ EMPIEZA EL PLUS DE TOMA DE DECISIONES DE POWER QUERY (M)
                     if 'df_raw_LTSA' in st.session_state:
                         st.divider()
-                        st.markdown("### 🧠 Dashboard Estratégico Operativo: Planta vs Terceros (Datos LTSA)")
+                        st.markdown("### Dashboard Estratégico Operativo: Planta vs Terceros (Datos LTSA)")
                         
                         df_ltsa = st.session_state['df_raw_LTSA'].copy()
                         
