@@ -760,31 +760,51 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
 def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre_pestana_bd, df_pagos_reales, corte_seleccionado):
     try:
         xls = pd.ExcelFile(archivo)
-        hoja_objetivo = sheet_buscada if sheet_buscada in xls.sheet_names else xls.sheet_names[0]
+        hoja_objetivo = None
         
-        # Lectura dinámica: buscar la fila exacta que contiene los encabezados
+        # 1. Búsqueda inteligente de la pestaña (sin importar cómo se llame)
+        posibles_nombres = [sheet_buscada, 'REPORTE', 'COBRO', 'BASE', 'DATOS']
+        for nombre in posibles_nombres:
+            if nombre in xls.sheet_names:
+                hoja_objetivo = nombre
+                break
+                
+        # Si no la encuentra por nombre, busca la hoja que tenga encabezados lógicos en sus primeras filas
+        if not hoja_objetivo:
+            for sh in xls.sheet_names:
+                df_test = pd.read_excel(archivo, sheet_name=sh, nrows=15, header=None)
+                if df_test.astype(str).apply(lambda col: col.str.contains('CEDULA|CÉDULA|IDENTIFICACION|IDENTIFICACIÓN', case=False, na=False)).any().any():
+                    hoja_objetivo = sh
+                    break
+                    
+        # Fallback de emergencia
+        if not hoja_objetivo:
+            hoja_objetivo = xls.sheet_names[0]
+
+        # 2. Lectura dinámica: buscar la fila exacta que contiene los encabezados en la hoja detectada
         df_temp = pd.read_excel(archivo, sheet_name=hoja_objetivo, nrows=15, header=None)
-        fila_header = 4  # Valor por defecto (skiprows=4) por si no encuentra la palabra
+        fila_header = 4  # Valor por defecto
         for idx, fila in df_temp.iterrows():
             textos = fila.astype(str).str.upper().tolist()
-            if any(col in textos for col in ['CÉDULA', 'CEDULA', 'CC', 'C.C.']):
+            if any(col in textos for col in ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN']):
                 fila_header = idx
                 break
 
         df_cobro = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
         df_cobro.columns = df_cobro.columns.str.strip().str.upper()
         
-        col_ced_cobro = obtener_nombre_columna(df_cobro, ['CÉDULA', 'CEDULA', 'CC'])
-        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR'])
+        col_ced_cobro = obtener_nombre_columna(df_cobro, ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN'])
+        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR', 'NETO'])
         col_vehiculo = obtener_nombre_columna(df_cobro, ['TIPO DE VEHICULO', 'VEHICULO', 'CATEGORIA'])
         col_almacen = obtener_nombre_columna(df_cobro, ['PUNTO DE VENTA', 'ALMACEN', 'CLIENTE'])
         
         if not (col_ced_cobro and col_total_cobro):
-            st.error("No se encontraron columnas de Cédula o Total en el archivo. Verifica el formato.")
+            st.error(f"No se encontraron columnas de Cédula o Total en la hoja procesada ({hoja_objetivo}). Verifica el formato del archivo.")
             return
 
         df_cobro = df_cobro.dropna(subset=[col_ced_cobro])
-        df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(".0", "", regex=False).str.strip()
+        # 3. Sanitización estricta de la cédula para cruce exacto (quitar puntos, comas, letras y espacios)
+        df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(r'\D', '', regex=True).str.strip()
         df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
         
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg({
@@ -809,7 +829,7 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         else:
             df_cruce['CATEGORIA_VEHICULO'] = "NO DEFINIDO"
         
-        st.success("✅ Datos cruzados exitosamente.")
+        st.success(f"✅ Datos de la hoja '{hoja_objetivo}' cruzados exitosamente. Se encontraron {len(df_cruce)} coincidencias.")
         
         tab_emp, tab_veh, tab_alm = st.tabs(["👥 Rentabilidad por Empleado", "🛵 Rentabilidad por Vehículo", "🏢 Rentabilidad por Almacén"])
         
@@ -947,9 +967,9 @@ st.divider()
 corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar / visualizar:", cortes_disponibles)
 df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado].copy()
 
-# --- PREPARACIÓN DE COLUMNAS CLAVE ---
-df_pagos_corte['_ced_prestador_clean'] = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(".0", "", regex=False).str.strip()
-df_pagos_corte['_ced_banco_clean'] = df_pagos_corte[col_cedula_banco].astype(str).str.replace(".0", "", regex=False).str.strip()
+# --- PREPARACIÓN DE COLUMNAS CLAVE CON SANITIZACIÓN ROBUSTA (Solución a emparejamientos fallidos) ---
+df_pagos_corte['_ced_prestador_clean'] = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(r'\D', '', regex=True).str.strip()
+df_pagos_corte['_ced_banco_clean'] = df_pagos_corte[col_cedula_banco].astype(str).str.replace(r'\D', '', regex=True).str.strip()
 
 
 tab_generador, tab_informes, tab_rentabilidad = st.tabs([
@@ -1256,8 +1276,9 @@ with tab_informes:
         if col_horas_inf:
             df_informe[col_horas_inf] = pd.to_numeric(df_informe[col_horas_inf], errors='coerce').fillna(0)
         
-        df_informe['_ced_prestador_clean'] = df_informe[col_cedula_prestador].astype(str).str.replace(".0", "", regex=False).str.strip()
-        df_informe['_ced_banco_clean'] = df_informe[col_cedula_banco].astype(str).str.replace(".0", "", regex=False).str.strip()
+        # Limpieza estandarizada para cruces correctos en los gráficos
+        df_informe['_ced_prestador_clean'] = df_informe[col_cedula_prestador].astype(str).str.replace(r'\D', '', regex=True).str.strip()
+        df_informe['_ced_banco_clean'] = df_informe[col_cedula_banco].astype(str).str.replace(r'\D', '', regex=True).str.strip()
         
         valid_records = df_informe[df_informe['_ced_prestador_clean'].isin(['nan', '', 'None']) == False]
         total_cuentas = len(valid_records.drop_duplicates(subset=['_ced_prestador_clean', '_ced_banco_clean']))
@@ -1397,7 +1418,7 @@ with tab_informes:
 with tab_rentabilidad:
     st.markdown("### 📈 Módulo de Rentabilidad Operativa (Histórico)")
     
-    # Pre-calculamos los pagos netos de la quincena (Se ejecuta 1 sola vez para que sea súper rápido)
+    # Pre-calculamos los pagos netos de la quincena 
     if "df_pagos_reales" not in st.session_state or st.session_state.get('corte_procesado') != corte_seleccionado:
         pagos_agrupados = []
         titulares_unicos = df_pagos_corte.drop_duplicates(subset=['_ced_prestador_clean', '_ced_banco_clean'])
@@ -1436,7 +1457,8 @@ with tab_rentabilidad:
         st.info("Sube el **Cuadro Validador Quincenal (Excel de Pollos y Panadería)** para calcular la rentabilidad de la operación y registrarla en el histórico.")
         archivo_pollos = st.file_uploader("📥 Subir archivo Validador (POLLOS)", type=["xlsx", "xls"], key="file_pollos")
         if archivo_pollos is not None:
-            renderizar_modulo_rentabilidad(archivo_pollos, 'REPORTE', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado)
+            # Aquí la función renderizar_modulo_rentabilidad buscará dinámicamente si se llama COBRO o REPORTE
+            renderizar_modulo_rentabilidad(archivo_pollos, 'COBRO', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado)
 
     with sub_directo:
         st.info("Sube el **Listado de Personal Directo** para detectar el personal activo, extraer sus costos de nómina correspondientes y enviar el consolidado al histórico.")
@@ -1447,16 +1469,20 @@ with tab_rentabilidad:
                 df_directo = pd.read_excel(archivo_directo)
                 df_directo.columns = df_directo.columns.str.strip().str.upper()
                 
-                col_id = obtener_nombre_columna(df_directo, ['IDENTIFICACIÓN', 'IDENTIFICACION', 'CÉDULA', 'CEDULA'])
-                col_activo = obtener_nombre_columna(df_directo, ['ACTIVO', 'ESTADO'])
+                # Ampliamos la búsqueda de los alias de columnas incluyendo tildes 
+                col_id = obtener_nombre_columna(df_directo, ['IDENTIFICACIÓN', 'IDENTIFICACION', 'CÉDULA', 'CEDULA', 'CC', 'DOCUMENTO'])
+                col_activo = obtener_nombre_columna(df_directo, ['ACTIVO', 'ESTADO', 'ESTADO ACTIVO'])
                 
                 if col_id:
                     if col_activo:
-                        df_activos = df_directo[df_directo[col_activo].astype(str).str.upper() == 'S']
+                        # Filtro flexible para estado activo reconociendo múltiples variaciones
+                        valores_activos = ['S', 'SI', 'SÍ', 'ACTIVO', '1', 'TRUE']
+                        df_activos = df_directo[df_directo[col_activo].astype(str).str.upper().str.strip().isin(valores_activos)]
                     else:
                         df_activos = df_directo 
                         
-                    cedulas_directo = df_activos[col_id].astype(str).str.replace(".0", "", regex=False).str.strip().tolist()
+                    # Sanitización estricta de la cédula del archivo de Personal Directo para coincidir exacto
+                    cedulas_directo = df_activos[col_id].astype(str).str.replace(r'\D', '', regex=True).str.strip().tolist()
                     
                     df_pagos_directo = df_pagos_reales[df_pagos_reales['_cedula_clean'].isin(cedulas_directo)].copy()
                     
@@ -1493,6 +1519,6 @@ with tab_rentabilidad:
                         else:
                             st.error(f"Error al guardar: {res.get('message')}")
                 else:
-                    st.error("No se encontró la columna de IDENTIFICACIÓN en el archivo listado. Verifique el formato.")
+                    st.error("No se encontró la columna de IDENTIFICACIÓN o CÉDULA en el archivo listado. Verifique el formato.")
             except Exception as e:
                 st.error(f"Error procesando el archivo: {e}")
