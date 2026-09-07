@@ -793,18 +793,22 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         df_cobro = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
         df_cobro.columns = df_cobro.columns.str.strip().str.upper()
         
+        # Guardamos la data cruda en sesión para el módulo de decisiones (Personal Directo)
+        if titulo_modulo == "LTSA":
+            st.session_state['df_raw_LTSA'] = df_cobro.copy()
+            
         col_ced_cobro = obtener_nombre_columna(df_cobro, ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN'])
         col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR', 'NETO'])
         col_vehiculo = obtener_nombre_columna(df_cobro, ['TIPO DE VEHICULO', 'VEHICULO', 'CATEGORIA'])
         col_almacen = obtener_nombre_columna(df_cobro, ['PUNTO DE VENTA', 'ALMACEN', 'CLIENTE'])
-        col_nombre_cobro = obtener_nombre_columna(df_cobro, ['NOMBRE', 'NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO']) # Agregado para rescatar el nombre si no está en BD
+        col_nombre_cobro = obtener_nombre_columna(df_cobro, ['NOMBRE', 'NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO']) 
         
         if not (col_ced_cobro and col_total_cobro):
             st.error(f"No se encontraron columnas de Cédula o Total en la hoja procesada ({hoja_objetivo}). Verifica el formato del archivo.")
             return
 
         df_cobro = df_cobro.dropna(subset=[col_ced_cobro])
-        # 3. Sanitización estricta de la cédula con control del .0 al final (Solución al fallo de cruce)
+        # 3. Sanitización estricta de la cédula con control del .0 al final
         df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
         
@@ -816,16 +820,13 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
-        # ---> EL CAMBIO CRÍTICO ESTÁ AQUÍ (how='left' en lugar de how='inner') <---
-        # Esto asegura que NINGÚN registro del Excel que subiste se elimine, incluso si 
-        # en la base de datos de Google Sheets (este corte) esa persona no cobró nada.
+        # CRUCE CON HOW='LEFT' PARA NO PERDER NINGÚN DATO DEL EXCEL
         df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='left')
         
-        # Rellenar vacíos (los que estaban en el Excel pero no en BD de esta quincena)
+        # Rellenar vacíos (los que estaban en el Excel pero no cobraron esta quincena en la BD)
         df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
         df_cruce['RETENCION_ASUMIDA'] = df_cruce['RETENCION_ASUMIDA'].fillna(0)
         
-        # Rescatar el nombre directamente desde el Excel subido si no estaba en BD
         if col_nombre_cobro:
             df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna(df_cruce[col_nombre_cobro])
         else:
@@ -1460,7 +1461,7 @@ with tab_rentabilidad:
 
     df_pagos_reales = st.session_state.df_pagos_reales
 
-    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo"])
+    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo (Decisiones)"])
     
     with sub_ltsa:
         st.info("Sube el **Cuadro Validador Quincenal (Excel de Cobro a LTSA)** para cruzarlo automáticamente con las cuentas de cobro generadas en esta quincena y calcular la utilidad real por empleado.")
@@ -1472,11 +1473,10 @@ with tab_rentabilidad:
         st.info("Sube el **Cuadro Validador Quincenal (Excel de Pollos y Panadería)** para calcular la rentabilidad de la operación y registrarla en el histórico.")
         archivo_pollos = st.file_uploader("📥 Subir archivo Validador (POLLOS)", type=["xlsx", "xls"], key="file_pollos")
         if archivo_pollos is not None:
-            # Aquí la función renderizar_modulo_rentabilidad buscará dinámicamente si se llama COBRO o REPORTE
             renderizar_modulo_rentabilidad(archivo_pollos, 'COBRO', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado)
 
     with sub_directo:
-        st.info("Sube el **Listado de Personal Directo** para detectar el personal activo, extraer sus costos de nómina correspondientes y enviar el consolidado al histórico.")
+        st.info("Sube el **Listado de Personal Directo** para generar un Dashboard Estratégico simulando la rentabilidad operativa de Planta vs Terceros (basado en la lógica del negocio 2026).")
         archivo_directo = st.file_uploader("📥 Subir Listado (Personal Directo)", type=["xlsx", "xls"], key="file_directo")
         
         if archivo_directo:
@@ -1484,60 +1484,120 @@ with tab_rentabilidad:
                 df_directo = pd.read_excel(archivo_directo)
                 df_directo.columns = df_directo.columns.str.strip().str.upper()
                 
-                # Ampliamos la búsqueda de los alias de columnas incluyendo tildes 
                 col_id = obtener_nombre_columna(df_directo, ['IDENTIFICACIÓN', 'IDENTIFICACION', 'CÉDULA', 'CEDULA', 'CC', 'DOCUMENTO'])
                 col_activo = obtener_nombre_columna(df_directo, ['ACTIVO', 'ESTADO', 'ESTADO ACTIVO'])
                 
                 if col_id:
                     if col_activo:
-                        # Filtro flexible para estado activo reconociendo múltiples variaciones
                         valores_activos = ['S', 'SI', 'SÍ', 'ACTIVO', '1', 'TRUE']
                         df_activos = df_directo[df_directo[col_activo].astype(str).str.upper().str.strip().isin(valores_activos)]
                     else:
                         df_activos = df_directo 
                         
-                    # Sanitización estricta de la cédula del archivo de Personal Directo para coincidir exacto
-                    cedulas_directo = df_activos[col_id].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip().tolist()
+                    cedulas_planta = df_activos[col_id].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip().tolist()
                     
-                    # ---------------------------------------------------------
-                    # NOTA IMPORTANTE: Si la tabla muestra solo 1 persona aquí, 
-                    # significa que de los 181 empleados activos del Excel, solo 1 
-                    # tiene una cuenta de cobro en Google Sheets en la quincena.
-                    # ---------------------------------------------------------
-                    df_pagos_directo = df_pagos_reales[df_pagos_reales['_cedula_clean'].isin(cedulas_directo)].copy()
+                    st.success(f"✅ Se detectaron **{len(cedulas_planta)}** empleados de Planta activos en la base de datos.")
                     
-                    tot_nomina = float(df_pagos_directo['VALOR_PAGADO_NETO'].sum())
-                    tot_retencion = float(df_pagos_directo['RETENCION_ASUMIDA'].sum())
-                    
-                    st.success(f"✅ Se cruzaron los datos con éxito. Se detectaron **{len(df_pagos_directo)}** empleados en la nómina de esta quincena correspondientes al Personal Directo.")
-                    
-                    st.dataframe(
-                        df_pagos_directo.rename(columns={
-                            '_cedula_clean': 'Cédula', 'NOMBRE_EMPLEADO': 'Empleado', 
-                            'VALOR_PAGADO_NETO': 'Costo de Nómina', 'RETENCION_ASUMIDA': 'Retenciones'
-                        }).style.format({'Costo de Nómina': '${:,.0f}', 'Retenciones': '${:,.0f}'}), 
-                        hide_index=True, use_container_width=True
-                    )
-                    
-                    st.divider()
-                    st.markdown("### 💰 Gran Total Quincena (Personal Directo)")
-                    r1, r2 = st.columns(2)
-                    r1.metric("Total Costo de Nómina", f"${tot_nomina:,.0f}")
-                    r2.metric("Total Retenciones Generadas", f"${tot_retencion:,.0f}")
-                    
-                    st.divider()
-                    st.markdown(f"### 💾 Guardar Trazabilidad Histórica (Personal Directo)")
-                    if st.button("Guardar Consolidado Personal Directo en la Nube", type="primary", key="btn_save_directo", use_container_width=True):
-                        fecha_registro = datetime.now(timezone(timedelta(hours=-5))).strftime("%Y-%m-%d %H:%M")
-                        row_directo = [fecha_registro, corte_seleccionado, tot_nomina, tot_retencion]
+                    # AQUÍ EMPIEZA EL PLUS DE TOMA DE DECISIONES DE POWER QUERY (M)
+                    if 'df_raw_LTSA' in st.session_state:
+                        st.divider()
+                        st.markdown("### 🧠 Dashboard Estratégico Operativo: Planta vs Terceros (Datos LTSA)")
                         
-                        with st.spinner("Conectando con Google Sheets..."):
-                            res = guardar_en_historico(GAS_URL, "RENTABILIDAD_PERSONAL_DIRECTO", row_directo)
+                        df_ltsa = st.session_state['df_raw_LTSA'].copy()
+                        
+                        col_ced_ltsa = obtener_nombre_columna(df_ltsa, ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION'])
+                        col_tot_ltsa = obtener_nombre_columna(df_ltsa, ['TOTAL', 'VALOR TOTAL'])
+                        col_dias_ltsa = obtener_nombre_columna(df_ltsa, ['DÍAS/HORAS', 'DIAS/HORAS', 'CANTIDAD', 'DIAS'])
+                        col_concepto = obtener_nombre_columna(df_ltsa, ['CONCEPTO TARIFA', 'CONCEPTO'])
+                        col_veh_ltsa = obtener_nombre_columna(df_ltsa, ['TIPO DE VEHICULO', 'VEHICULO'])
+                        
+                        if col_ced_ltsa and col_tot_ltsa and col_dias_ltsa and col_concepto and col_veh_ltsa:
+                            df_ltsa['_cedula_clean'] = df_ltsa[col_ced_ltsa].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
+                            df_ltsa = df_ltsa[df_ltsa['_cedula_clean'] != '']
                             
-                        if res.get("status") == "success":
-                            st.success("¡Excelente! Los datos se han guardado permanentemente en la hoja RENTABILIDAD_PERSONAL_DIRECTO.")
+                            df_ltsa['TOTAL'] = pd.to_numeric(df_ltsa[col_tot_ltsa], errors='coerce').fillna(0)
+                            df_ltsa['DIAS_HORAS'] = pd.to_numeric(df_ltsa[col_dias_ltsa], errors='coerce').fillna(0)
+                            df_ltsa['CONCEPTO_UPPER'] = df_ltsa[col_concepto].astype(str).str.upper()
+                            
+                            df_ltsa['Es_Planta'] = df_ltsa['_cedula_clean'].isin(cedulas_planta).map({True: 'Planta', False: 'Tercero'})
+                            
+                            def cat_veh(v):
+                                v_str = str(v).upper()
+                                if 'CARGUERO' in v_str: return 'MOTO CARGUERO'
+                                if 'MOTO' in v_str: return 'MOTO'
+                                return 'CARRY / CARRO'
+                                
+                            df_ltsa['CATEGORIA'] = df_ltsa[col_veh_ltsa].apply(cat_veh)
+                            
+                            # Fórmulas 2026 de tu código Power Query
+                            BaseSalarialPrestacional = 2573360
+                            CostoDiarioMoto = (BaseSalarialPrestacional + 500000) / 30
+                            CostoDiarioEsp = (BaseSalarialPrestacional + 2200000) / 30
+                            CostoHoraExtra = 11571.25
+                            
+                            def calc_cost(row):
+                                if row['Es_Planta'] == 'Planta':
+                                    if 'HORA' in row['CONCEPTO_UPPER']: return row['DIAS_HORAS'] * CostoHoraExtra
+                                    if 'PERIFERIA' in row['CONCEPTO_UPPER']: return 0
+                                    if row['CATEGORIA'] == 'MOTO': return row['DIAS_HORAS'] * CostoDiarioMoto
+                                    return row['DIAS_HORAS'] * CostoDiarioEsp
+                                else:
+                                    return row['TOTAL'] * 0.85
+                                    
+                            df_ltsa['Costo_Asumido'] = df_ltsa.apply(calc_cost, axis=1)
+                            df_ltsa['Retencion'] = df_ltsa.apply(lambda x: x['Costo_Asumido'] * 0.04 if x['Es_Planta'] == 'Tercero' else 0, axis=1)
+                            df_ltsa['Costo_Total'] = df_ltsa['Costo_Asumido'] + df_ltsa['Retencion']
+                            df_ltsa['Utilidad'] = df_ltsa['TOTAL'] - df_ltsa['Costo_Total']
+                            
+                            t_fact = float(df_ltsa['TOTAL'].sum())
+                            t_cost = float(df_ltsa['Costo_Total'].sum())
+                            t_util = float(df_ltsa['Utilidad'].sum())
+                            
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Facturación Total (LTSA)", f"${t_fact:,.0f}")
+                            c2.metric("Costo Op. Estimado (Power Query)", f"${t_cost:,.0f}")
+                            c3.metric("Utilidad Teórica Generada", f"${t_util:,.0f}", f"{(t_util/t_fact)*100 if t_fact>0 else 0:.1f}% Margen")
+                            
+                            st.markdown("#### 1. Análisis Comparativo: Utilidad Planta vs Terceros")
+                            
+                            df_agrupado = df_ltsa.groupby('Es_Planta').agg({
+                                'TOTAL': 'sum', 'Costo_Total': 'sum', 'Utilidad': 'sum'
+                            }).reset_index()
+                            df_agrupado['Margen'] = (df_agrupado['Utilidad'] / df_agrupado['TOTAL']).fillna(0)
+                            
+                            col_graf1, col_graf2 = st.columns(2)
+                            
+                            with col_graf1:
+                                fig1 = px.pie(df_agrupado, names='Es_Planta', values='Utilidad', title="¿Quién genera más Utilidad?", hole=0.4, color='Es_Planta', color_discrete_map={'Planta':'#15803d', 'Tercero':'#E3000F'})
+                                st.plotly_chart(fig1, use_container_width=True)
+                                
+                            with col_graf2:
+                                st.markdown("<br><br>", unsafe_allow_html=True)
+                                st.dataframe(df_agrupado.style.format({'TOTAL': '${:,.0f}', 'Costo_Total': '${:,.0f}', 'Utilidad': '${:,.0f}', 'Margen': '{:.1%}'}), hide_index=True, use_container_width=True)
+                                
+                            st.markdown("#### 2. Rentabilidad Específica por Categoría de Vehículo")
+                            df_cat = df_ltsa.groupby(['CATEGORIA', 'Es_Planta']).agg({'TOTAL': 'sum', 'Utilidad': 'sum'}).reset_index()
+                            df_cat['Margen'] = (df_cat['Utilidad'] / df_cat['TOTAL']).fillna(0)
+                            
+                            fig2 = px.bar(df_cat, x='CATEGORIA', y='Utilidad', color='Es_Planta', barmode='group', text_auto='$.3s', title="Utilidad por Vehículo (Planta vs Terceros)", color_discrete_map={'Planta':'#15803d', 'Tercero':'#E3000F'})
+                            st.plotly_chart(fig2, use_container_width=True)
+                            
+                            st.divider()
+                            st.markdown("### 💾 Guardar Proyección Histórica (Decisiones)")
+                            if st.button("Guardar Proyección Planta vs Terceros en la Nube", type="primary", key="btn_save_proy", use_container_width=True):
+                                fecha_registro = datetime.now(timezone(timedelta(hours=-5))).strftime("%Y-%m-%d %H:%M")
+                                row_directo = [fecha_registro, corte_seleccionado, t_fact, t_cost, t_util]
+                                with st.spinner("Conectando con Google Sheets..."):
+                                    res = guardar_en_historico(GAS_URL, "RENTABILIDAD_PROYECCION", row_directo)
+                                if res.get("status") == "success":
+                                    st.success("¡Datos guardados exitosamente en RENTABILIDAD_PROYECCION!")
+                                else:
+                                    st.error("Error al guardar.")
                         else:
-                            st.error(f"Error al guardar: {res.get('message')}")
+                            st.warning("El archivo LTSA subido previamente no tiene las columnas requeridas (DÍAS/HORAS, CONCEPTO TARIFA) para poder simular.")
+                    else:
+                        st.info("💡 **Tip de Análisis Inteligente:**\n\n1. Ve primero a la pestaña '**🚚 Rentabilidad LTSA**'.\n2. Sube ahí el cuadro validador de LTSA.\n3. Luego **regresa a esta pestaña** para ver el Dashboard Estratégico automático comparando tus utilidades teóricas de Planta vs Terceros.")
+                        
                 else:
                     st.error("No se encontró la columna de IDENTIFICACIÓN o CÉDULA en el archivo listado. Verifique el formato.")
             except Exception as e:
