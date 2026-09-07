@@ -1461,7 +1461,7 @@ with tab_rentabilidad:
 
     df_pagos_reales = st.session_state.df_pagos_reales
 
-    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo"])
+    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo (Decisiones)"])
     
     with sub_ltsa:
         st.info("Sube el **Cuadro Validador Quincenal (Excel de Cobro a LTSA)** para cruzarlo automáticamente con las cuentas de cobro generadas en esta quincena y calcular la utilidad real por empleado.")
@@ -1501,7 +1501,7 @@ with tab_rentabilidad:
                     # AQUÍ EMPIEZA EL PLUS DE TOMA DE DECISIONES DE POWER QUERY (M)
                     if 'df_raw_LTSA' in st.session_state:
                         st.divider()
-                        st.markdown("### Dashboard Estratégico Operativo: Planta vs Terceros (Datos LTSA)")
+                        st.markdown("### 🧠 Dashboard Estratégico Operativo: Planta vs Terceros (Datos LTSA)")
                         
                         df_ltsa = st.session_state['df_raw_LTSA'].copy()
                         
@@ -1588,11 +1588,11 @@ with tab_rentabilidad:
                                 fecha_registro = datetime.now(timezone(timedelta(hours=-5))).strftime("%Y-%m-%d %H:%M")
                                 row_directo = [fecha_registro, corte_seleccionado, t_fact, t_cost, t_util]
                                 with st.spinner("Conectando con Google Sheets..."):
-                                    res = guardar_en_historico(GAS_URL, "RENTABILIDAD_PROYECCION", row_directo)
+                                    res = guardar_en_historico(GAS_URL, "RENTABILIDAD_PERSONAL_DIRECTO", row_directo)
                                 if res.get("status") == "success":
-                                    st.success("¡Datos guardados exitosamente en RENTABILIDAD_PROYECCION!")
+                                    st.success("¡Datos guardados exitosamente en la pestaña RENTABILIDAD_PERSONAL_DIRECTO!")
                                 else:
-                                    st.error("Error al guardar.")
+                                    st.error(f"Error al guardar: {res.get('message', 'Pestaña no encontrada o error de conexión.')}")
                         else:
                             st.warning("El archivo LTSA subido previamente no tiene las columnas requeridas (DÍAS/HORAS, CONCEPTO TARIFA) para poder simular.")
                     else:
