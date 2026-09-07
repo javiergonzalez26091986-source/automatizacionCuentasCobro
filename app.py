@@ -797,6 +797,7 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR', 'NETO'])
         col_vehiculo = obtener_nombre_columna(df_cobro, ['TIPO DE VEHICULO', 'VEHICULO', 'CATEGORIA'])
         col_almacen = obtener_nombre_columna(df_cobro, ['PUNTO DE VENTA', 'ALMACEN', 'CLIENTE'])
+        col_nombre_cobro = obtener_nombre_columna(df_cobro, ['NOMBRE', 'NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO']) # Agregado para rescatar el nombre si no está en BD
         
         if not (col_ced_cobro and col_total_cobro):
             st.error(f"No se encontraron columnas de Cédula o Total en la hoja procesada ({hoja_objetivo}). Verifica el formato del archivo.")
@@ -807,14 +808,28 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
         
-        cobro_agrupado = df_cobro.groupby('_cedula_clean').agg({
-            col_total_cobro: 'sum',
-            col_vehiculo: 'first' if col_vehiculo else 'min',
-            col_almacen: 'first' if col_almacen else 'min'
-        }).reset_index()
+        agg_dict = { col_total_cobro: 'sum' }
+        if col_vehiculo: agg_dict[col_vehiculo] = 'first'
+        if col_almacen: agg_dict[col_almacen] = 'first'
+        if col_nombre_cobro: agg_dict[col_nombre_cobro] = 'first'
+        
+        cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
-        df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='inner')
+        # ---> EL CAMBIO CRÍTICO ESTÁ AQUÍ (how='left' en lugar de how='inner') <---
+        # Esto asegura que NINGÚN registro del Excel que subiste se elimine, incluso si 
+        # en la base de datos de Google Sheets (este corte) esa persona no cobró nada.
+        df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='left')
+        
+        # Rellenar vacíos (los que estaban en el Excel pero no en BD de esta quincena)
+        df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
+        df_cruce['RETENCION_ASUMIDA'] = df_cruce['RETENCION_ASUMIDA'].fillna(0)
+        
+        # Rescatar el nombre directamente desde el Excel subido si no estaba en BD
+        if col_nombre_cobro:
+            df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna(df_cruce[col_nombre_cobro])
+        else:
+            df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna("S/N (Sin cobro en BD)")
         
         df_cruce['UTILIDAD_BRUTA'] = df_cruce['TOTAL_COBRADO_LTSA'] - df_cruce['VALOR_PAGADO_NETO']
         df_cruce['UTILIDAD_REAL_NETA'] = df_cruce['UTILIDAD_BRUTA'] - df_cruce['RETENCION_ASUMIDA']
@@ -829,7 +844,7 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         else:
             df_cruce['CATEGORIA_VEHICULO'] = "NO DEFINIDO"
         
-        st.success(f"✅ Datos de la hoja '{hoja_objetivo}' cruzados exitosamente. Se encontraron {len(df_cruce)} coincidencias.")
+        st.success(f"✅ Datos de la hoja '{hoja_objetivo}' cruzados exitosamente. Mostrando todos los **{len(df_cruce)}** registros del Excel.")
         
         tab_emp, tab_veh, tab_alm = st.tabs(["👥 Rentabilidad por Empleado", "🛵 Rentabilidad por Vehículo", "🏢 Rentabilidad por Almacén"])
         
@@ -1484,6 +1499,11 @@ with tab_rentabilidad:
                     # Sanitización estricta de la cédula del archivo de Personal Directo para coincidir exacto
                     cedulas_directo = df_activos[col_id].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip().tolist()
                     
+                    # ---------------------------------------------------------
+                    # NOTA IMPORTANTE: Si la tabla muestra solo 1 persona aquí, 
+                    # significa que de los 181 empleados activos del Excel, solo 1 
+                    # tiene una cuenta de cobro en Google Sheets en la quincena.
+                    # ---------------------------------------------------------
                     df_pagos_directo = df_pagos_reales[df_pagos_reales['_cedula_clean'].isin(cedulas_directo)].copy()
                     
                     tot_nomina = float(df_pagos_directo['VALOR_PAGADO_NETO'].sum())
