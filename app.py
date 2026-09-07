@@ -1461,7 +1461,7 @@ with tab_rentabilidad:
 
     df_pagos_reales = st.session_state.df_pagos_reales
 
-    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo (Decisiones)"])
+    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo"])
     
     with sub_ltsa:
         st.info("Sube el **Cuadro Validador Quincenal (Excel de Cobro a LTSA)** para cruzarlo automáticamente con las cuentas de cobro generadas en esta quincena y calcular la utilidad real por empleado.")
