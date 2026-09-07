@@ -761,7 +761,17 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
     try:
         xls = pd.ExcelFile(archivo)
         hoja_objetivo = sheet_buscada if sheet_buscada in xls.sheet_names else xls.sheet_names[0]
-        df_cobro = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=4)
+        
+        # Lectura dinámica: buscar la fila exacta que contiene los encabezados
+        df_temp = pd.read_excel(archivo, sheet_name=hoja_objetivo, nrows=15, header=None)
+        fila_header = 4  # Valor por defecto (skiprows=4) por si no encuentra la palabra
+        for idx, fila in df_temp.iterrows():
+            textos = fila.astype(str).str.upper().tolist()
+            if any(col in textos for col in ['CÉDULA', 'CEDULA', 'CC', 'C.C.']):
+                fila_header = idx
+                break
+
+        df_cobro = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
         df_cobro.columns = df_cobro.columns.str.strip().str.upper()
         
         col_ced_cobro = obtener_nombre_columna(df_cobro, ['CÉDULA', 'CEDULA', 'CC'])
@@ -1426,7 +1436,7 @@ with tab_rentabilidad:
         st.info("Sube el **Cuadro Validador Quincenal (Excel de Pollos y Panadería)** para calcular la rentabilidad de la operación y registrarla en el histórico.")
         archivo_pollos = st.file_uploader("📥 Subir archivo Validador (POLLOS)", type=["xlsx", "xls"], key="file_pollos")
         if archivo_pollos is not None:
-            renderizar_modulo_rentabilidad(archivo_pollos, 'COBRO', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado)
+            renderizar_modulo_rentabilidad(archivo_pollos, 'REPORTE', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado)
 
     with sub_directo:
         st.info("Sube el **Listado de Personal Directo** para detectar el personal activo, extraer sus costos de nómina correspondientes y enviar el consolidado al histórico.")
