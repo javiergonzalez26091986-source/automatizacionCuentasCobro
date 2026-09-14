@@ -86,14 +86,14 @@ st.markdown("""
 GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp40hdIzJeEm4dKNLBgDVxwEY95T0EIoBu_qo8FB/exec"
 
 # ==============================================================================
-# DICCIONARIO DE BANCOS (PARA EL EXCEL PAB)
+# DICCIONARIO DE BANCOS (CORREGIDO CON LOS CÓDIGOS ACH ESTÁNDAR)
 # ==============================================================================
 CODIGOS_BANCOS = {
-    "BANCO DE BOGOTA": "1001", "BANCO POPULAR": "1002", "BANCOLOMBIA": "1007",
-    "DAVIVIENDA": "1051", "BANCO DE OCCIDENTE": "1023", "BANCO CAJA SOCIAL": "1032",
-    "BANCO AGRARIO": "1040", "BANCO AV VILLAS": "1052", "NEQUI": "1507",
-    "DAVIPLATA": "1551", "BANCO W": "1053", "SCOTIABANK COLPATRIA": "1014",
-    "TUYA S.A": "1026", "BANCO FALABELLA S.A.": "1062", "LULO BANK S.A.": "1070"
+    "BANCO DE BOGOTA": "1", "BANCO POPULAR": "2", "BANCOLOMBIA": "7",
+    "DAVIVIENDA": "51", "BANCO DE OCCIDENTE": "23", "BANCO CAJA SOCIAL": "32",
+    "BANCO AGRARIO": "40", "BANCO AV VILLAS": "52", "NEQUI": "1507",
+    "DAVIPLATA": "1551", "BANCO W": "53", "SCOTIABANK COLPATRIA": "14",
+    "TUYA S.A": "26", "BANCO FALABELLA S.A.": "62", "LULO BANK S.A.": "70"
 }
 
 def obtener_fecha_actual():
@@ -147,7 +147,7 @@ def get_pdf_bytes(pdf_obj):
     return out.encode('latin-1') if isinstance(out, str) else bytes(out)
 
 # ==============================================================================
-# GENERACIÓN DE ARCHIVO EXCEL PAB 
+# GENERACIÓN DE ARCHIVO EXCEL PAB (CON SOPORTE DINÁMICO DE TIPO DOC)
 # ==============================================================================
 def generar_excel_pab(df_banco):
     output = io.BytesIO()
@@ -156,7 +156,7 @@ def generar_excel_pab(df_banco):
     df_banco['TIPO_CUENTA_PAB'] = df_banco["TIPO_CUENTA"].apply(lambda x: "Ahorros" if "AHORRO" in str(x).upper() else "Corriente")
     
     df_pab = pd.DataFrame({
-        "TIPO_IDENTIFICACION": "CC",
+        "TIPO_IDENTIFICACION": df_banco["TIPO_IDENTIFICACION"],
         "NIT_BENEFICIARIO": df_banco["NIT_BENEFICIARIO"],
         "NOMBRE_BENEFICIARIO": df_banco["NOMBRE_BENEFICIARIO"],
         "CODIGO_BANCO": df_banco["CODIGO_BANCO"],
@@ -189,7 +189,7 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 6, str(datos['nombre_prestador']).upper(), 0, 1, 'C')
     pdf.set_font("helvetica", "", 11)
-    pdf.cell(0, 6, f"C.C / NIT {datos['cedula_prestador']}", 0, 1, 'C')
+    pdf.cell(0, 6, f"{datos['tipo_documento_pab']} {datos['cedula_prestador']}", 0, 1, 'C')
     pdf.ln(8)
 
     pdf.set_font("helvetica", "B", 11)
@@ -300,7 +300,7 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(80, 5, str(datos['nombre_prestador']).upper(), "T", 1, "L")
     pdf.set_font("helvetica", "", 11)
-    pdf.cell(80, 5, f"C.C / NIT {datos['cedula_prestador']}", 0, 1, "L")
+    pdf.cell(80, 5, f"{datos['tipo_documento_pab']} {datos['cedula_prestador']}", 0, 1, "L")
 
 def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.add_page()
@@ -369,7 +369,7 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.set_font('helvetica', '', 9)
     pdf.cell(100, 6, datos['nombre_prestador'][:45], 1)
     pdf.set_font('helvetica', 'B', 9)
-    pdf.cell(20, 6, "C.C / NIT:", 1)
+    pdf.cell(20, 6, f"{datos['tipo_documento_pab']}:", 1)
     pdf.set_font('helvetica', '', 9)
     pdf.cell(0, 6, datos['cedula_prestador'], 1, 1)
     
@@ -472,7 +472,7 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.set_font('helvetica', 'B', 9)
     pdf.cell(80, 5, "________________________________________________", 0, 1)
     pdf.cell(80, 5, "FIRMA PRESTADOR DEL SERVICIO", 0, 1)
-    pdf.cell(80, 5, f"C.C. / NIT: {datos['cedula_prestador']}", 0, 1)
+    pdf.cell(80, 5, f"{datos['tipo_documento_pab']}: {datos['cedula_prestador']}", 0, 1)
     pdf.cell(80, 5, f"NOMBRE: {datos['nombre_prestador']}", 0, 1)
 
 def construir_hoja_documento_equivalente_excel(ws, datos):
@@ -515,7 +515,7 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws['B13'].font = header_font; ws['B13'].fill = dark_fill; ws.merge_cells('B13:H13')
 
     ws['B14'] = "Nombre:"; ws['B14'].font = bold_font; ws['C14'] = datos['nombre_prestador']; ws.merge_cells('C14:E14')
-    ws['G14'] = "C.C / NIT:"; ws['G14'].font = bold_font; ws['H14'] = datos['cedula_prestador']
+    ws['G14'] = f"{datos['tipo_documento_pab']}:"; ws['G14'].font = bold_font; ws['H14'] = datos['cedula_prestador']
     
     ws['G16'] = "Conductores:"; ws['G16'].font = bold_font
     nombres_conds = ", ".join([c['nombre_conductor'] for c in datos['conductores']])
@@ -589,7 +589,7 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws[f'B{fila_firma}'] = "________________________________________________"
     ws[f'B{fila_firma+1}'] = "FIRMA PRESTADOR DEL SERVICIO"
     ws[f'B{fila_firma+1}'].font = bold_font
-    ws[f'B{fila_firma+2}'] = f"C.C. / NIT: {datos['cedula_prestador']}"
+    ws[f'B{fila_firma+2}'] = f"{datos['tipo_documento_pab']}: {datos['cedula_prestador']}"
     ws[f'B{fila_firma+3}'] = f"NOMBRE: {datos['nombre_prestador']}"
 
     ws.column_dimensions['B'].width = 16; ws.column_dimensions['C'].width = 12; ws.column_dimensions['D'].width = 12
@@ -601,7 +601,7 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws.page_margins.left = 0.5; ws.page_margins.right = 0.5; ws.page_margins.top = 0.5; ws.page_margins.bottom = 0.5
 
 # ==============================================================================
-# PROCESO MATEMÁTICO PRINCIPAL 
+# PROCESO MATEMÁTICO PRINCIPAL (CON EXTRACCIÓN DINÁMICA DE TIPO DOCUMENTO)
 # ==============================================================================
 def obtener_nombre_columna(df, opciones):
     for op in opciones:
@@ -627,6 +627,16 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
     suma_otros_desc = 0
 
     row_titular = grupo_df.iloc[0]
+    
+    # --- LÓGICA DE EXTRACCIÓN DE TIPO DOCUMENTO AGREGADA POR DOÑA YESENIA ---
+    tipo_doc_raw = str(row_titular.get('TIPO DE DOCUMENTO', '')).upper().strip()
+    if not tipo_doc_raw or tipo_doc_raw == "NAN":
+        tipo_doc_raw = str(row_titular.get('TIPO DOCUMENTO', 'CC')).upper().strip()
+        
+    if 'NIT' in tipo_doc_raw: tipo_doc_pab = 'NIT'
+    elif 'CE' in tipo_doc_raw or 'EXTRANJ' in tipo_doc_raw: tipo_doc_pab = 'CE'
+    elif 'PASAPORTE' in tipo_doc_raw or 'PP' in tipo_doc_raw: tipo_doc_pab = 'PP'
+    else: tipo_doc_pab = 'CC'
     
     nombre_prestador = str(row_titular.get(col_prestador, 'S/N')).strip()
     cedula_prestador = str(row_titular.get(col_ced_prestador, '')).strip()
@@ -748,6 +758,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
         'cedula_prestador': cedula_prestador,
         'nombre_titular_banco': nombre_titular_banco,
         'cedula_titular_banco': cedula_titular_banco,
+        'tipo_documento_pab': tipo_doc_pab,
         'banco': banco,
         'tipo_cuenta': tipo_cuenta,
         'num_cuenta': num_cuenta,
@@ -772,14 +783,12 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         xls = pd.ExcelFile(archivo)
         hoja_objetivo = None
         
-        # 1. Búsqueda inteligente de la pestaña (sin importar cómo se llame)
         posibles_nombres = [sheet_buscada, 'REPORTE', 'COBRO', 'BASE', 'DATOS']
         for nombre in posibles_nombres:
             if nombre in xls.sheet_names:
                 hoja_objetivo = nombre
                 break
                 
-        # Si no la encuentra por nombre, busca la hoja que tenga encabezados lógicos en sus primeras filas
         if not hoja_objetivo:
             for sh in xls.sheet_names:
                 df_test = pd.read_excel(archivo, sheet_name=sh, nrows=15, header=None)
@@ -787,13 +796,11 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
                     hoja_objetivo = sh
                     break
                     
-        # Fallback de emergencia
         if not hoja_objetivo:
             hoja_objetivo = xls.sheet_names[0]
 
-        # 2. Lectura dinámica: buscar la fila exacta que contiene los encabezados en la hoja detectada
         df_temp = pd.read_excel(archivo, sheet_name=hoja_objetivo, nrows=15, header=None)
-        fila_header = 4  # Valor por defecto
+        fila_header = 4  
         for idx, fila in df_temp.iterrows():
             textos = fila.astype(str).str.upper().tolist()
             if any(col in textos for col in ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN']):
@@ -803,7 +810,6 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         df_cobro = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
         df_cobro.columns = df_cobro.columns.str.strip().str.upper()
         
-        # Guardamos la data cruda en sesión para el módulo de decisiones (Personal Directo)
         if titulo_modulo == "LTSA":
             st.session_state['df_raw_LTSA'] = df_cobro.copy()
             
@@ -818,7 +824,6 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
             return
 
         df_cobro = df_cobro.dropna(subset=[col_ced_cobro])
-        # 3. Sanitización estricta de la cédula con control del .0 al final
         df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
         
@@ -830,10 +835,8 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
-        # CRUCE CON HOW='LEFT' PARA NO PERDER NINGÚN DATO DEL EXCEL
         df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='left')
         
-        # Rellenar vacíos (los que estaban en el Excel pero no cobraron esta quincena en la BD)
         df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
         df_cruce['RETENCION_ASUMIDA'] = df_cruce['RETENCION_ASUMIDA'].fillna(0)
         
@@ -993,7 +996,7 @@ st.divider()
 corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar / visualizar:", cortes_disponibles)
 df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado].copy()
 
-# --- PREPARACIÓN DE COLUMNAS CLAVE CON SANITIZACIÓN ROBUSTA (Solución a emparejamientos fallidos) ---
+# --- PREPARACIÓN DE COLUMNAS CLAVE CON SANITIZACIÓN ROBUSTA ---
 df_pagos_corte['_ced_prestador_clean'] = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
 df_pagos_corte['_ced_banco_clean'] = df_pagos_corte[col_cedula_banco].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
 
@@ -1063,6 +1066,7 @@ with tab_generador:
                             if col == "CONDUCTOR": alias_busqueda.extend(["MENSAJERO", "NOMBRE"])
                             if col == "VALOR HORA": alias_busqueda.extend(["VALOR_HORA"])
                             if col == "ESTADO": alias_busqueda.extend(["ESTADO_EMPLEADO"])
+                            if col == "TIPO DE DOCUMENTO": alias_busqueda.extend(["TIPO_DOCUMENTO", "DOCUMENTO"])
                             
                             col_raw_match = obtener_nombre_columna(df_raw, alias_busqueda)
                             if col_raw_match and pd.notna(row[col_raw_match]) and str(row[col_raw_match]).strip() != "":
@@ -1086,7 +1090,7 @@ with tab_generador:
                         result_rows.append(new_row)
                         
                     df_res = pd.DataFrame(result_rows)
-                    st.success(f"✅ ¡Cruce Exitoso 100% Dinámico! Se extrajeron las horas y cruzaron con todas las columnas actuales de BD.")
+                    st.success(f"✅ ¡Cruce Exitoso 100% Dinámico! Se extrajeron las horas y cruzaron con todas las columnas actuales de BD (incluyendo 'TIPO DE DOCUMENTO').")
                     
                     excel_out = io.BytesIO()
                     df_res.to_excel(excel_out, index=False, sheet_name="PAGOS PERSONAL POR SERVICIOS")
@@ -1106,7 +1110,6 @@ with tab_generador:
                 st.error(f"Error procesando el archivo: {e}")
 
     else:
-        # Reemplazamos la advertencia estática de Milton por una advertencia dinámica
         if not df_fuera.empty:
             col_cond_fuera_test = obtener_nombre_columna(df_fuera, ['CONDUCTOR', 'NOMBRE', 'NOMBRES'])
             if not col_cond_fuera_test:
@@ -1219,6 +1222,7 @@ with tab_generador:
                             ws = wb_eq_banco.create_sheet(title=nombre_pestana); construir_hoja_documento_equivalente_excel(ws, datos_doc)
                             
                             pagos_procesados_banco.append({
+                                'TIPO_IDENTIFICACION': datos_doc['tipo_documento_pab'],
                                 'NIT_BENEFICIARIO': datos_doc['cedula_titular_banco'],
                                 'NOMBRE_BENEFICIARIO': datos_doc['nombre_titular_banco'],
                                 'BANCO_DESTINO': datos_doc['banco'],
@@ -1447,7 +1451,6 @@ with tab_informes:
 with tab_rentabilidad:
     st.markdown("### 📈 Módulo de Rentabilidad Operativa (Histórico)")
     
-    # Pre-calculamos los pagos netos de la quincena 
     if "df_pagos_reales" not in st.session_state or st.session_state.get('corte_procesado') != corte_seleccionado:
         pagos_agrupados = []
         titulares_unicos = df_pagos_corte.drop_duplicates(subset=['_ced_prestador_clean', '_ced_banco_clean'])
@@ -1511,7 +1514,6 @@ with tab_rentabilidad:
                     
                     st.success(f"✅ Se detectaron **{len(cedulas_planta)}** empleados de Planta activos en la base de datos.")
                     
-                    # AQUÍ EMPIEZA EL PLUS DE TOMA DE DECISIONES DE POWER QUERY (M)
                     if 'df_raw_LTSA' in st.session_state:
                         st.divider()
                         st.markdown("### 🧠 Dashboard Estratégico Operativo: Planta vs Terceros (Datos LTSA)")
@@ -1542,7 +1544,6 @@ with tab_rentabilidad:
                                 
                             df_ltsa['CATEGORIA'] = df_ltsa[col_veh_ltsa].apply(cat_veh)
                             
-                            # Fórmulas 2026 de tu código Power Query
                             BaseSalarialPrestacional = 2573360
                             CostoDiarioMoto = (BaseSalarialPrestacional + 500000) / 30
                             CostoDiarioEsp = (BaseSalarialPrestacional + 2200000) / 30
