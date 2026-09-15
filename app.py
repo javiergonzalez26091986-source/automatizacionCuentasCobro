@@ -86,7 +86,7 @@ st.markdown("""
 GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp40hdIzJeEm4dKNLBgDVxwEY95T0EIoBu_qo8FB/exec"
 
 # ==============================================================================
-# DICCIONARIO DE BANCOS (CORREGIDO CON LOS CÓDIGOS ACH ESTÁNDAR)
+# DICCIONARIO DE BANCOS 
 # ==============================================================================
 CODIGOS_BANCOS = {
     "BANCO DE BOGOTA": "1", "BANCO POPULAR": "2", "BANCOLOMBIA": "7",
@@ -147,25 +147,46 @@ def get_pdf_bytes(pdf_obj):
     return out.encode('latin-1') if isinstance(out, str) else bytes(out)
 
 # ==============================================================================
-# GENERACIÓN DE ARCHIVO EXCEL PAB (CON SOPORTE DINÁMICO DE TIPO DOC)
+# GENERACIÓN DE ARCHIVO EXCEL PAB (ESTRUCTURA IDÉNTICA AL FORMATO)
 # ==============================================================================
-def generar_excel_pab(df_banco):
+def generar_excel_pab(df_banco, corte_seleccionado):
     output = io.BytesIO()
-    
     df_banco['CODIGO_BANCO'] = df_banco["BANCO_DESTINO"].map(CODIGOS_BANCOS).fillna("")
-    df_banco['TIPO_CUENTA_PAB'] = df_banco["TIPO_CUENTA"].apply(lambda x: "Ahorros" if "AHORRO" in str(x).upper() else "Corriente")
     
-    df_pab = pd.DataFrame({
-        "TIPO_IDENTIFICACION": df_banco["TIPO_IDENTIFICACION"],
-        "NIT_BENEFICIARIO": df_banco["NIT_BENEFICIARIO"],
-        "NOMBRE_BENEFICIARIO": df_banco["NOMBRE_BENEFICIARIO"],
-        "CODIGO_BANCO": df_banco["CODIGO_BANCO"],
-        "TIPO_CUENTA": df_banco["TIPO_CUENTA_PAB"],
-        "NUMERO_CUENTA": df_banco["NUMERO_CUENTA"].astype(str).str.replace("'", "").str.replace("-", "").str.replace(" ", "").str.strip(),
-        "VALOR_PAGAR": df_banco["VALOR_NETO_A_PAGAR"]
-    })
+    def map_tipo_doc(t):
+        t = str(t).upper()
+        if 'NIT' in t: return '3' 
+        elif 'CE' in t: return '2'
+        elif 'TI' in t: return '4'
+        elif 'PP' in t or 'PASAPORTE' in t: return '5'
+        else: return '1' # CC por defecto
+        
+    fecha_app = datetime.now(timezone(timedelta(hours=-5))).strftime("%Y%m%d")
     
-    df_pab.to_excel(output, index=False, sheet_name="FORMATOPAB")
+    # Construir estructura exacta basada en el archivo de Doña Yesenia
+    filas_pab = []
+    filas_pab.append(['NIT PAGADOR', 'TIPO DE PAGO', 'APLICACIÓN', 'SECUENCIA DE ENVÍO', 'NRO CUENTA A DEBITAR', 'TIPO DE CUENTA A DEBITAR', 'DESCRIPCIÓN DEL PAGO', '', '', '', '', ''])
+    
+    desc_pago = f"SERVICIOS {str(corte_seleccionado).upper()}"[:40]
+    filas_pab.append(['900561833', '225', 'I', 'A1', '81016173001', 'D', desc_pago, '', '', '', '', ''])
+    
+    filas_pab.append(['Tipo Documento Beneficiario', 'Nit Beneficiario', 'Nombre Beneficiario ', 'Tipo Transaccion ', 'Código Banco ', 'No Cuenta Beneficiario ', 'Email ', 'Documento Autorizado ', 'Referencia ', 'Celular Beneficiario', 'ValorTransaccion ', 'Fecha de aplicación'])
+    
+    for _, row in df_banco.iterrows():
+        filas_pab.append([
+            map_tipo_doc(row['TIPO_IDENTIFICACION']),
+            str(row['NIT_BENEFICIARIO']).replace('.0', ''),
+            row['NOMBRE_BENEFICIARIO'],
+            '37', # Código fijo de Tipo Transaccion en el formato
+            row['CODIGO_BANCO'],
+            str(row['NUMERO_CUENTA']).replace("'", "").replace("-", "").replace(" ", "").strip(),
+            '', '', '', '', # Columnas vacías del medio
+            row['VALOR_NETO_A_PAGAR'],
+            fecha_app
+        ])
+        
+    df_pab = pd.DataFrame(filas_pab)
+    df_pab.to_excel(output, index=False, header=False, sheet_name="FORMATOPAB")
     return output.getvalue()
 
 # ==============================================================================
@@ -628,7 +649,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
 
     row_titular = grupo_df.iloc[0]
     
-    # --- LÓGICA DE EXTRACCIÓN DE TIPO DOCUMENTO AGREGADA POR DOÑA YESENIA ---
     tipo_doc_raw = str(row_titular.get('TIPO DE DOCUMENTO', '')).upper().strip()
     if not tipo_doc_raw or tipo_doc_raw == "NAN":
         tipo_doc_raw = str(row_titular.get('TIPO DOCUMENTO', 'CC')).upper().strip()
@@ -671,13 +691,10 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
 
         fuera_perimetro_neto = 0.0
         
-        # --- AQUÍ ESTÁ LA NUEVA LÓGICA DINÁMICA PARA CUALQUIER CONDUCTOR ---
         if not df_fuera.empty and nombre_conductor != "" and nombre_conductor not in conductores_procesados_fpu:
-            # Buscamos la columna que indique el nombre del conductor en la pestaña FUERAS PERIMETRO
             col_cond_fuera = obtener_nombre_columna(df_fuera, ['CONDUCTOR', 'NOMBRE', 'PRESTADOR', 'NOMBRES'])
             
             if col_cond_fuera:
-                # Filtramos las filas que le corresponden a este conductor en específico
                 df_fuera_cond = df_fuera[df_fuera[col_cond_fuera].astype(str).str.upper().str.contains(nombre_conductor, na=False, regex=False)]
                 
                 if not df_fuera_cond.empty:
@@ -776,7 +793,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
     }
 
 # ==============================================================================
-# FUNCIÓN AUXILIAR DE RENTABILIDAD (Para Reusar en LTSA y POLLOS)
+# FUNCIÓN AUXILIAR DE RENTABILIDAD (100% REAL, BASADA EN GOOGLE SHEETS)
 # ==============================================================================
 def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre_pestana_bd, df_pagos_reales, corte_seleccionado):
     try:
@@ -835,19 +852,19 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
+        # CRUZAMOS CON LO QUE REALMENTE SE PAGÓ EN GOOGLE SHEETS
         df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='left')
         
         df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
-        df_cruce['RETENCION_ASUMIDA'] = df_cruce['RETENCION_ASUMIDA'].fillna(0)
         
         if col_nombre_cobro:
             df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna(df_cruce[col_nombre_cobro])
         else:
             df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna("S/N (Sin cobro en BD)")
         
-        df_cruce['UTILIDAD_BRUTA'] = df_cruce['TOTAL_COBRADO_LTSA'] - df_cruce['VALOR_PAGADO_NETO']
-        df_cruce['UTILIDAD_REAL_NETA'] = df_cruce['UTILIDAD_BRUTA'] - df_cruce['RETENCION_ASUMIDA']
-        df_cruce['MARGEN_REAL'] = (df_cruce['UTILIDAD_REAL_NETA'] / df_cruce['TOTAL_COBRADO_LTSA']).fillna(0)
+        # LA UTILIDAD ES EXCLUSIVAMENTE LO COBRADO MENOS LO PAGADO
+        df_cruce['UTILIDAD_REAL_NETA'] = df_cruce['TOTAL_COBRADO_LTSA'] - df_cruce['VALOR_PAGADO_NETO']
+        df_cruce['MARGEN_REAL'] = (df_cruce['UTILIDAD_REAL_NETA'] / df_cruce['TOTAL_COBRADO_LTSA'].replace(0, 1)).fillna(0)
         
         if col_vehiculo:
             df_cruce['CATEGORIA_VEHICULO'] = df_cruce[col_vehiculo].apply(lambda x: 
@@ -858,18 +875,18 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         else:
             df_cruce['CATEGORIA_VEHICULO'] = "NO DEFINIDO"
         
-        st.success(f"✅ Datos de la hoja '{hoja_objetivo}' cruzados exitosamente. Mostrando todos los **{len(df_cruce)}** registros del Excel.")
+        st.success(f"✅ Datos cruzados exactamente con los pagos reales de Sheets. Mostrando los **{len(df_cruce)}** registros encontrados.")
         
         tab_emp, tab_veh, tab_alm = st.tabs(["👥 Rentabilidad por Empleado", "🛵 Rentabilidad por Vehículo", "🏢 Rentabilidad por Almacén"])
         
         format_dict = {
             'TOTAL_COBRADO_LTSA': '${:,.0f}', 'VALOR_PAGADO_NETO': '${:,.0f}',
-            'RETENCION_ASUMIDA': '${:,.0f}', 'UTILIDAD_REAL_NETA': '${:,.0f}', 'MARGEN_REAL': '{:.1%}'
+            'UTILIDAD_REAL_NETA': '${:,.0f}', 'MARGEN_REAL': '{:.1%}'
         }
 
         with tab_emp:
-            st.markdown("#### Detalle de Rentabilidad por Colaborador")
-            df_show_emp = df_cruce[['_cedula_clean', 'NOMBRE_EMPLEADO', 'CATEGORIA_VEHICULO', 'TOTAL_COBRADO_LTSA', 'VALOR_PAGADO_NETO', 'RETENCION_ASUMIDA', 'UTILIDAD_REAL_NETA', 'MARGEN_REAL']].sort_values('UTILIDAD_REAL_NETA', ascending=False)
+            st.markdown("#### Detalle Real por Colaborador")
+            df_show_emp = df_cruce[['_cedula_clean', 'NOMBRE_EMPLEADO', 'CATEGORIA_VEHICULO', 'TOTAL_COBRADO_LTSA', 'VALOR_PAGADO_NETO', 'UTILIDAD_REAL_NETA', 'MARGEN_REAL']].sort_values('UTILIDAD_REAL_NETA', ascending=False)
             
             styler_emp = df_show_emp.style.format(format_dict)
             try:
@@ -882,12 +899,11 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
                 st.dataframe(df_show_emp, hide_index=True, use_container_width=True, height=400)
             
         with tab_veh:
-            st.markdown("#### Rentabilidad Consolidada por Tipo de Vehículo")
+            st.markdown("#### Rentabilidad Consolidada por Vehículo")
             df_veh_agg = df_cruce.groupby('CATEGORIA_VEHICULO').agg({
-                'TOTAL_COBRADO_LTSA': 'sum', 'VALOR_PAGADO_NETO': 'sum',
-                'RETENCION_ASUMIDA': 'sum', 'UTILIDAD_REAL_NETA': 'sum'
+                'TOTAL_COBRADO_LTSA': 'sum', 'VALOR_PAGADO_NETO': 'sum', 'UTILIDAD_REAL_NETA': 'sum'
             }).reset_index()
-            df_veh_agg['MARGEN_REAL'] = (df_veh_agg['UTILIDAD_REAL_NETA'] / df_veh_agg['TOTAL_COBRADO_LTSA']).fillna(0)
+            df_veh_agg['MARGEN_REAL'] = (df_veh_agg['UTILIDAD_REAL_NETA'] / df_veh_agg['TOTAL_COBRADO_LTSA'].replace(0, 1)).fillna(0)
             st.dataframe(df_veh_agg.style.format(format_dict), hide_index=True, use_container_width=True)
             
         with tab_alm:
@@ -896,29 +912,27 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
                 df_alm_agg = df_cruce.groupby(col_almacen).agg({
                     'TOTAL_COBRADO_LTSA': 'sum', 'VALOR_PAGADO_NETO': 'sum', 'UTILIDAD_REAL_NETA': 'sum'
                 }).reset_index().sort_values('UTILIDAD_REAL_NETA', ascending=False)
-                df_alm_agg['MARGEN_REAL'] = (df_alm_agg['UTILIDAD_REAL_NETA'] / df_alm_agg['TOTAL_COBRADO_LTSA']).fillna(0)
+                df_alm_agg['MARGEN_REAL'] = (df_alm_agg['UTILIDAD_REAL_NETA'] / df_alm_agg['TOTAL_COBRADO_LTSA'].replace(0, 1)).fillna(0)
                 st.dataframe(df_alm_agg.style.format(format_dict), hide_index=True, use_container_width=True, height=400)
             else:
                 st.info("No se encontró columna de almacén en este validador.")
         
         st.divider()
         st.markdown(f"### 💰 Gran Total Quincena ({titulo_modulo})")
-        r1, r2, r3, r4 = st.columns(4)
+        r1, r2, r3 = st.columns(3)
         tot_cobrado = float(df_cruce['TOTAL_COBRADO_LTSA'].sum())
         tot_pagado = float(df_cruce['VALOR_PAGADO_NETO'].sum())
-        tot_retencion = float(df_cruce['RETENCION_ASUMIDA'].sum())
         tot_utilidad = float(df_cruce['UTILIDAD_REAL_NETA'].sum())
         
-        r1.metric("Total Cobrado", f"${tot_cobrado:,.0f}")
-        r2.metric("Pagado Neto Conductores", f"${tot_pagado:,.0f}")
-        r3.metric("Retenciones Asumidas", f"${tot_retencion:,.0f}")
-        r4.metric("UTILIDAD REAL NETA", f"${tot_utilidad:,.0f}")
+        r1.metric("Total Cobrado/Facturado", f"${tot_cobrado:,.0f}")
+        r2.metric("Total Pagado (Google Sheets)", f"${tot_pagado:,.0f}")
+        r3.metric("UTILIDAD REAL NETA", f"${tot_utilidad:,.0f}")
         
         st.divider()
         st.markdown(f"### 💾 Guardar Trazabilidad Histórica ({titulo_modulo})")
         if st.button(f"Guardar Consolidado {titulo_modulo} en la Nube", type="primary", key=f"btn_save_{titulo_modulo}", use_container_width=True):
             fecha_registro = datetime.now(timezone(timedelta(hours=-5))).strftime("%Y-%m-%d %H:%M")
-            row_to_save = [fecha_registro, corte_seleccionado, tot_cobrado, tot_pagado, tot_retencion, tot_utilidad]
+            row_to_save = [fecha_registro, corte_seleccionado, tot_cobrado, tot_pagado, tot_utilidad]
             
             with st.spinner("Conectando con Google Sheets..."):
                 resultado = guardar_en_historico(GAS_URL, nombre_pestana_bd, row_to_save)
@@ -1228,9 +1242,7 @@ with tab_generador:
                                 'BANCO_DESTINO': datos_doc['banco'],
                                 'TIPO_CUENTA': datos_doc['tipo_cuenta'],
                                 'NUMERO_CUENTA': datos_doc['num_cuenta'],
-                                'VALOR_NETO_A_PAGAR': datos_doc['neto_final'],
-                                'FECHA_PAGO': datetime.now(timezone(timedelta(hours=-5))).strftime("%Y/%m/%d"),
-                                'CONCEPTO': 'NOMINA'
+                                'VALOR_NETO_A_PAGAR': datos_doc['neto_final']
                             })
                             count_banco += 1
                         contador += 1
@@ -1249,7 +1261,7 @@ with tab_generador:
                     zip_eq_banco_io.seek(0)
                     
                     df_banco = pd.DataFrame(pagos_procesados_banco)
-                    archivo_pab_bytes = generar_excel_pab(df_banco) if len(df_banco) > 0 else b""
+                    archivo_pab_bytes = generar_excel_pab(df_banco, corte_seleccionado) if len(df_banco) > 0 else b""
                     
                     mensaje_carga.empty() 
                     st.success(f"✅ ¡Éxito! Procesamiento finalizado. **{count_banco}** pagos aprobados listos para pago en banco.")
@@ -1446,53 +1458,49 @@ with tab_informes:
                     )
 
 # ==============================================================================
-# PESTAÑA 3: MÓDULO DE RENTABILIDAD OPERATIVA Y TRAZABILIDAD
+# PESTAÑA 3: MÓDULO DE RENTABILIDAD OPERATIVA Y TRAZABILIDAD (REALIDAD)
 # ==============================================================================
 with tab_rentabilidad:
-    st.markdown("### 📈 Módulo de Rentabilidad Operativa (Histórico)")
+    st.markdown("### 📈 Módulo de Rentabilidad Operativa (Basado 100% en Hechos)")
     
     if "df_pagos_reales" not in st.session_state or st.session_state.get('corte_procesado') != corte_seleccionado:
-        pagos_agrupados = []
-        titulares_unicos = df_pagos_corte.drop_duplicates(subset=['_ced_prestador_clean', '_ced_banco_clean'])
+        # Aquí tomamos DIRECTAMENTE la información de Google Sheets (lo que ella paga de su bolsillo)
+        col_total_pagar = obtener_nombre_columna(df_pagos_corte, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
         
-        for _, row in titulares_unicos.iterrows():
-            cedula = str(row['_ced_prestador_clean'])
-            if cedula in ['nan', '', 'None']: continue
+        if col_total_pagar:
+            df_pagos_corte['_valor_pagar_num'] = df_pagos_corte[col_total_pagar].apply(limpiar_dinero)
             
-            mask = df_pagos_corte['_ced_prestador_clean'] == cedula
-            grupo = df_pagos_corte[mask]
+            df_pagos_agrupados = df_pagos_corte.groupby('_ced_prestador_clean').agg(
+                NOMBRE_EMPLEADO=(col_prestador, 'first'),
+                VALOR_PAGADO_NETO=('_valor_pagar_num', 'sum')
+            ).reset_index()
             
-            calc = calcular_valores_agrupados(grupo, df_fuera, corte_seleccionado, col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco, col_estado, col_anticipos, col_otros_desc, col_valor_dia)
+            df_pagos_agrupados.rename(columns={'_ced_prestador_clean': '_cedula_clean'}, inplace=True)
+            df_pagos_agrupados = df_pagos_agrupados[df_pagos_agrupados['_cedula_clean'].isin(['nan', '', 'None']) == False]
             
-            if calc:
-                pagos_agrupados.append({
-                    '_cedula_clean': cedula,
-                    'NOMBRE_EMPLEADO': calc['nombre_prestador'],
-                    'VALOR_PAGADO_NETO': calc['neto_final'] + calc['anticipos'] + calc['otros_descuentos'], 
-                    'RETENCION_ASUMIDA': calc['retefuente'] + calc['ica']
-                })
-                
-        st.session_state.df_pagos_reales = pd.DataFrame(pagos_agrupados)
-        st.session_state.corte_procesado = corte_seleccionado
+            st.session_state.df_pagos_reales = df_pagos_agrupados
+            st.session_state.corte_procesado = corte_seleccionado
+        else:
+            st.error("No se detectó una columna de 'TOTAL A PAGAR' en la hoja para consolidar los pagos.")
 
     df_pagos_reales = st.session_state.df_pagos_reales
 
-    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo (Decisiones)"])
+    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo (Cruce)"])
     
     with sub_ltsa:
-        st.info("Sube el **Cuadro Validador Quincenal (Excel de Cobro a LTSA)** para cruzarlo automáticamente con las cuentas de cobro generadas en esta quincena y calcular la utilidad real por empleado.")
+        st.info("Sube el **Cuadro Validador (LTSA)**. El sistema cruzará lo que vas a COBRAR ahí, con lo que vas a PAGAR (según la pestaña de pagos actual).")
         archivo_ltsa = st.file_uploader("📥 Subir archivo Validador (LTSA)", type=["xlsx", "xls"], key="file_ltsa")
         if archivo_ltsa is not None:
             renderizar_modulo_rentabilidad(archivo_ltsa, 'REPORTE', "LTSA", "RENTABILIDAD_HISTORICA", df_pagos_reales, corte_seleccionado)
 
     with sub_pollos:
-        st.info("Sube el **Cuadro Validador Quincenal (Excel de Pollos y Panadería)** para calcular la rentabilidad de la operación y registrarla en el histórico.")
+        st.info("Sube el **Cuadro Validador (POLLOS)**. El sistema cruzará lo facturado allí vs lo pagado en la base de datos.")
         archivo_pollos = st.file_uploader("📥 Subir archivo Validador (POLLOS)", type=["xlsx", "xls"], key="file_pollos")
         if archivo_pollos is not None:
             renderizar_modulo_rentabilidad(archivo_pollos, 'COBRO', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado)
 
     with sub_directo:
-        st.info("Sube el **Listado de Personal Directo** para generar un Dashboard Estratégico simulando la rentabilidad operativa de Planta vs Terceros (basado en la lógica del negocio 2026).")
+        st.info("Sube el **Listado de Personal Directo** para filtrar y comparar de forma exclusiva la Utilidad Real (Cobrado en Validador vs Pagado en Sheets) de este personal.")
         archivo_directo = st.file_uploader("📥 Subir Listado (Personal Directo)", type=["xlsx", "xls"], key="file_directo")
         
         if archivo_directo:
@@ -1501,104 +1509,66 @@ with tab_rentabilidad:
                 df_directo.columns = df_directo.columns.str.strip().str.upper()
                 
                 col_id = obtener_nombre_columna(df_directo, ['IDENTIFICACIÓN', 'IDENTIFICACION', 'CÉDULA', 'CEDULA', 'CC', 'DOCUMENTO'])
-                col_activo = obtener_nombre_columna(df_directo, ['ACTIVO', 'ESTADO', 'ESTADO ACTIVO'])
                 
                 if col_id:
-                    if col_activo:
-                        valores_activos = ['S', 'SI', 'SÍ', 'ACTIVO', '1', 'TRUE']
-                        df_activos = df_directo[df_directo[col_activo].astype(str).str.upper().str.strip().isin(valores_activos)]
-                    else:
-                        df_activos = df_directo 
-                        
-                    cedulas_planta = df_activos[col_id].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip().tolist()
-                    
-                    st.success(f"✅ Se detectaron **{len(cedulas_planta)}** empleados de Planta activos en la base de datos.")
+                    cedulas_planta = df_directo[col_id].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip().tolist()
+                    st.success(f"✅ Se detectaron **{len(cedulas_planta)}** empleados en la lista de Personal Directo.")
                     
                     if 'df_raw_LTSA' in st.session_state:
                         st.divider()
-                        st.markdown("### 🧠 Dashboard Estratégico Operativo: Planta vs Terceros (Datos LTSA)")
+                        st.markdown("### 🧠 Dashboard Estratégico Operativo: Directos vs Terceros (Basado en la Realidad)")
                         
                         df_ltsa = st.session_state['df_raw_LTSA'].copy()
-                        
                         col_ced_ltsa = obtener_nombre_columna(df_ltsa, ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION'])
                         col_tot_ltsa = obtener_nombre_columna(df_ltsa, ['TOTAL', 'VALOR TOTAL'])
-                        col_dias_ltsa = obtener_nombre_columna(df_ltsa, ['DÍAS/HORAS', 'DIAS/HORAS', 'CANTIDAD', 'DIAS'])
-                        col_concepto = obtener_nombre_columna(df_ltsa, ['CONCEPTO TARIFA', 'CONCEPTO'])
-                        col_veh_ltsa = obtener_nombre_columna(df_ltsa, ['TIPO DE VEHICULO', 'VEHICULO'])
                         
-                        if col_ced_ltsa and col_tot_ltsa and col_dias_ltsa and col_concepto and col_veh_ltsa:
+                        if col_ced_ltsa and col_tot_ltsa:
                             df_ltsa['_cedula_clean'] = df_ltsa[col_ced_ltsa].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
                             df_ltsa = df_ltsa[df_ltsa['_cedula_clean'] != '']
                             
-                            df_ltsa['TOTAL'] = pd.to_numeric(df_ltsa[col_tot_ltsa], errors='coerce').fillna(0)
-                            df_ltsa['DIAS_HORAS'] = pd.to_numeric(df_ltsa[col_dias_ltsa], errors='coerce').fillna(0)
-                            df_ltsa['CONCEPTO_UPPER'] = df_ltsa[col_concepto].astype(str).str.upper()
+                            df_ltsa['TOTAL_COBRADO'] = pd.to_numeric(df_ltsa[col_tot_ltsa], errors='coerce').fillna(0)
                             
-                            df_ltsa['Es_Planta'] = df_ltsa['_cedula_clean'].isin(cedulas_planta).map({True: 'Planta', False: 'Tercero'})
+                            # Agrupamos lo cobrado por persona
+                            ltsa_grouped = df_ltsa.groupby('_cedula_clean')['TOTAL_COBRADO'].sum().reset_index()
                             
-                            def cat_veh(v):
-                                v_str = str(v).upper()
-                                if 'CARGUERO' in v_str: return 'MOTO CARGUERO'
-                                if 'MOTO' in v_str: return 'MOTO'
-                                return 'CARRY / CARRO'
-                                
-                            df_ltsa['CATEGORIA'] = df_ltsa[col_veh_ltsa].apply(cat_veh)
+                            # Cruzamos con la realidad total de los pagos
+                            df_cruce_directo = pd.merge(ltsa_grouped, df_pagos_reales, on='_cedula_clean', how='outer').fillna(0)
                             
-                            BaseSalarialPrestacional = 2573360
-                            CostoDiarioMoto = (BaseSalarialPrestacional + 500000) / 30
-                            CostoDiarioEsp = (BaseSalarialPrestacional + 2200000) / 30
-                            CostoHoraExtra = 11571.25
+                            # Marcamos quién es directo
+                            df_cruce_directo['Tipo_Contratacion'] = df_cruce_directo['_cedula_clean'].isin(cedulas_planta).map({True: 'Directo (Planta)', False: 'Tercero'})
                             
-                            def calc_cost(row):
-                                if row['Es_Planta'] == 'Planta':
-                                    if 'HORA' in row['CONCEPTO_UPPER']: return row['DIAS_HORAS'] * CostoHoraExtra
-                                    if 'PERIFERIA' in row['CONCEPTO_UPPER']: return 0
-                                    if row['CATEGORIA'] == 'MOTO': return row['DIAS_HORAS'] * CostoDiarioMoto
-                                    return row['DIAS_HORAS'] * CostoDiarioEsp
-                                else:
-                                    return row['TOTAL'] * 0.85
-                                    
-                            df_ltsa['Costo_Asumido'] = df_ltsa.apply(calc_cost, axis=1)
-                            df_ltsa['Retencion'] = df_ltsa.apply(lambda x: x['Costo_Asumido'] * 0.04 if x['Es_Planta'] == 'Tercero' else 0, axis=1)
-                            df_ltsa['Costo_Total'] = df_ltsa['Costo_Asumido'] + df_ltsa['Retencion']
-                            df_ltsa['Utilidad'] = df_ltsa['TOTAL'] - df_ltsa['Costo_Total']
+                            # Utilidad exacta y estricta
+                            df_cruce_directo['UTILIDAD_REAL'] = df_cruce_directo['TOTAL_COBRADO'] - df_cruce_directo['VALOR_PAGADO_NETO']
                             
-                            t_fact = float(df_ltsa['TOTAL'].sum())
-                            t_cost = float(df_ltsa['Costo_Total'].sum())
-                            t_util = float(df_ltsa['Utilidad'].sum())
+                            t_fact = float(df_cruce_directo['TOTAL_COBRADO'].sum())
+                            t_cost = float(df_cruce_directo['VALOR_PAGADO_NETO'].sum())
+                            t_util = float(df_cruce_directo['UTILIDAD_REAL'].sum())
                             
                             c1, c2, c3 = st.columns(3)
                             c1.metric("Facturación Total (LTSA)", f"${t_fact:,.0f}")
-                            c2.metric("Costo Op. Estimado (Power Query)", f"${t_cost:,.0f}")
-                            c3.metric("Utilidad Teórica Generada", f"${t_util:,.0f}", f"{(t_util/t_fact)*100 if t_fact>0 else 0:.1f}% Margen")
+                            c2.metric("Pagado Real Total (Sheets)", f"${t_cost:,.0f}")
+                            c3.metric("Utilidad Real Total", f"${t_util:,.0f}")
                             
-                            st.markdown("#### 1. Análisis Comparativo: Utilidad Planta vs Terceros")
+                            st.markdown("#### 1. Análisis Comparativo: Utilidad Real Planta vs Terceros")
                             
-                            df_agrupado = df_ltsa.groupby('Es_Planta').agg({
-                                'TOTAL': 'sum', 'Costo_Total': 'sum', 'Utilidad': 'sum'
+                            df_agrupado = df_cruce_directo.groupby('Tipo_Contratacion').agg({
+                                'TOTAL_COBRADO': 'sum', 'VALOR_PAGADO_NETO': 'sum', 'UTILIDAD_REAL': 'sum'
                             }).reset_index()
-                            df_agrupado['Margen'] = (df_agrupado['Utilidad'] / df_agrupado['TOTAL']).fillna(0)
+                            df_agrupado['Margen_Real'] = (df_agrupado['UTILIDAD_REAL'] / df_agrupado['TOTAL_COBRADO'].replace(0, 1)).fillna(0)
                             
                             col_graf1, col_graf2 = st.columns(2)
                             
                             with col_graf1:
-                                fig1 = px.pie(df_agrupado, names='Es_Planta', values='Utilidad', title="¿Quién genera más Utilidad?", hole=0.4, color='Es_Planta', color_discrete_map={'Planta':'#15803d', 'Tercero':'#E3000F'})
+                                fig1 = px.pie(df_agrupado, names='Tipo_Contratacion', values='UTILIDAD_REAL', title="Distribución de la Utilidad Real", hole=0.4, color='Tipo_Contratacion', color_discrete_map={'Directo (Planta)':'#15803d', 'Tercero':'#E3000F'})
                                 st.plotly_chart(fig1, use_container_width=True)
                                 
                             with col_graf2:
                                 st.markdown("<br><br>", unsafe_allow_html=True)
-                                st.dataframe(df_agrupado.style.format({'TOTAL': '${:,.0f}', 'Costo_Total': '${:,.0f}', 'Utilidad': '${:,.0f}', 'Margen': '{:.1%}'}), hide_index=True, use_container_width=True)
+                                st.dataframe(df_agrupado.style.format({'TOTAL_COBRADO': '${:,.0f}', 'VALOR_PAGADO_NETO': '${:,.0f}', 'UTILIDAD_REAL': '${:,.0f}', 'Margen_Real': '{:.1%}'}), hide_index=True, use_container_width=True)
                                 
-                            st.markdown("#### 2. Rentabilidad Específica por Categoría de Vehículo")
-                            df_cat = df_ltsa.groupby(['CATEGORIA', 'Es_Planta']).agg({'TOTAL': 'sum', 'Utilidad': 'sum'}).reset_index()
-                            df_cat['Margen'] = (df_cat['Utilidad'] / df_cat['TOTAL']).fillna(0)
-                            
-                            fig2 = px.bar(df_cat, x='CATEGORIA', y='Utilidad', color='Es_Planta', barmode='group', text_auto='$.3s', title="Utilidad por Vehículo (Planta vs Terceros)", color_discrete_map={'Planta':'#15803d', 'Tercero':'#E3000F'})
-                            st.plotly_chart(fig2, use_container_width=True)
-                            
                             st.divider()
-                            st.markdown("### 💾 Guardar Proyección Histórica (Decisiones)")
-                            if st.button("Guardar Proyección Planta vs Terceros en la Nube", type="primary", key="btn_save_proy", use_container_width=True):
+                            st.markdown("### 💾 Guardar Cruzamiento (Planta vs Terceros)")
+                            if st.button("Guardar Estadísticas en la Nube", type="primary", key="btn_save_proy", use_container_width=True):
                                 fecha_registro = datetime.now(timezone(timedelta(hours=-5))).strftime("%Y-%m-%d %H:%M")
                                 row_directo = [fecha_registro, corte_seleccionado, t_fact, t_cost, t_util]
                                 with st.spinner("Conectando con Google Sheets..."):
@@ -1606,13 +1576,13 @@ with tab_rentabilidad:
                                 if res.get("status") == "success":
                                     st.success("¡Datos guardados exitosamente en la pestaña RENTABILIDAD_PERSONAL_DIRECTO!")
                                 else:
-                                    st.error(f"Error al guardar: {res.get('message', 'Pestaña no encontrada o error de conexión.')}")
+                                    st.error(f"Error al guardar: {res.get('message')}")
                         else:
-                            st.warning("El archivo LTSA subido previamente no tiene las columnas requeridas (DÍAS/HORAS, CONCEPTO TARIFA) para poder simular.")
+                            st.warning("El archivo LTSA subido previamente no tiene las columnas necesarias para hacer el cruce.")
                     else:
-                        st.info("💡 **Tip de Análisis Inteligente:**\n\n1. Ve primero a la pestaña '**🚚 Rentabilidad LTSA**'.\n2. Sube ahí el cuadro validador de LTSA.\n3. Luego **regresa a esta pestaña** para ver el Dashboard Estratégico automático comparando tus utilidades teóricas de Planta vs Terceros.")
+                        st.info("💡 **Recordatorio:**\nPara ver este cruce, primero carga el archivo de facturación en la pestaña **🚚 Rentabilidad LTSA** y luego vuelve aquí.")
                         
                 else:
-                    st.error("No se encontró la columna de IDENTIFICACIÓN o CÉDULA en el archivo listado. Verifique el formato.")
+                    st.error("No se encontró la columna de IDENTIFICACIÓN o CÉDULA en el archivo listado.")
             except Exception as e:
                 st.error(f"Error procesando el archivo: {e}")
