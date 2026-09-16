@@ -150,43 +150,106 @@ def get_pdf_bytes(pdf_obj):
 # GENERACIÓN DE ARCHIVO EXCEL PAB (ESTRUCTURA IDÉNTICA AL FORMATO)
 # ==============================================================================
 def generar_excel_pab(df_banco, corte_seleccionado):
-    output = io.BytesIO()
-    df_banco['CODIGO_BANCO'] = df_banco["BANCO_DESTINO"].map(CODIGOS_BANCOS).fillna("")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "FORMATOPAB"
     
+    # 1. Definir estilos idénticos al archivo original del banco
+    # El color "31869B" corresponde al azul/verde (Teal) técnico del formato
+    fill_headers = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
+    font_headers = Font(color="FFFFFF", bold=True)
+    align_center = Alignment(horizontal="center", vertical="center")
+    
+    # 2. Configurar el ancho exacto de las columnas
+    anchos = {'A': 26, 'B': 22, 'C': 25, 'D': 21, 'E': 28, 'F': 28, 'G': 28, 'H': 28, 'I': 20, 'J': 23, 'K': 25, 'L': 19}
+    for col, width in anchos.items():
+        ws.column_dimensions[col].width = width
+
+    # 3. Mapeo de Tipo de Documento Beneficiario (Regla estricta del banco)
     def map_tipo_doc(t):
         t = str(t).upper()
-        if 'NIT' in t: return '3' 
-        elif 'CE' in t: return '2'
-        elif 'TI' in t: return '4'
-        elif 'PP' in t or 'PASAPORTE' in t: return '5'
-        else: return '1' # CC por defecto
+        if 'NIT' in t: return 3
+        elif 'CE' in t or 'EXTRANJER' in t: return 2
+        elif 'TI' in t or 'IDENTIDAD' in t: return 4
+        elif 'PP' in t or 'PASAPORTE' in t: return 5
+        else: return 1 # 1: Cédula (Por defecto)
         
     fecha_app = datetime.now(timezone(timedelta(hours=-5))).strftime("%Y%m%d")
     
-    # Construir estructura exacta basada en el archivo de Doña Yesenia
-    filas_pab = []
-    filas_pab.append(['NIT PAGADOR', 'TIPO DE PAGO', 'APLICACIÓN', 'SECUENCIA DE ENVÍO', 'NRO CUENTA A DEBITAR', 'TIPO DE CUENTA A DEBITAR', 'DESCRIPCIÓN DEL PAGO', '', '', '', '', ''])
-    
-    desc_pago = f"SERVICIOS {str(corte_seleccionado).upper()}"[:40]
-    filas_pab.append(['900561833', '225', 'I', 'A1', '81016173001', 'D', desc_pago, '', '', '', '', ''])
-    
-    filas_pab.append(['Tipo Documento Beneficiario', 'Nit Beneficiario', 'Nombre Beneficiario ', 'Tipo Transaccion ', 'Código Banco ', 'No Cuenta Beneficiario ', 'Email ', 'Documento Autorizado ', 'Referencia ', 'Celular Beneficiario', 'ValorTransaccion ', 'Fecha de aplicación'])
+    # 4. Construcción de Fila 1 (Encabezados Principales)
+    headers_fila1 = ['NIT PAGADOR', 'TIPO DE PAGO', 'APLICACIÓN', 'SECUENCIA DE ENVÍO', 'NRO CUENTA A DEBITAR', 'TIPO DE CUENTA A DEBITAR', 'DESCRIPCIÓN DEL PAGO']
+    for col_idx, header in enumerate(headers_fila1, start=1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.value = header
+        cell.fill = fill_headers
+        cell.font = font_headers
+        cell.alignment = align_center
+
+    # 5. Construcción de Fila 2 (Valores Fijos PAB)
+    desc_pago = f"SERVICOS {str(corte_seleccionado).upper()}"[:40]
+    valores_fila2 = [900561833, 225, 'I', 'A1', 81016173001, 'D', desc_pago]
+    for col_idx, val in enumerate(valores_fila2, start=1):
+        cell = ws.cell(row=2, column=col_idx)
+        cell.value = val
+        cell.alignment = align_center
+
+    # 6. Construcción de Fila 3 (Encabezados Beneficiarios)
+    headers_fila3 = ['Tipo Documento Beneficiario', 'Nit Beneficiario', 'Nombre Beneficiario ', 'Tipo Transaccion ', 'Código Banco ', 'No Cuenta Beneficiario ', 'Email ', 'Documento Autorizado ', 'Referencia ', 'Celular Beneficiario', 'ValorTransaccion ', 'Fecha de aplicación']
+    for col_idx, header in enumerate(headers_fila3, start=1):
+        cell = ws.cell(row=3, column=col_idx)
+        cell.value = header
+        cell.fill = fill_headers
+        cell.font = font_headers
+        cell.alignment = align_center
+
+    # 7. Construcción de Datos Beneficiarios (Fila 4 en adelante)
+    fila_actual = 4
+    df_banco['CODIGO_BANCO'] = df_banco["BANCO_DESTINO"].map(CODIGOS_BANCOS).fillna("")
     
     for _, row in df_banco.iterrows():
-        filas_pab.append([
-            map_tipo_doc(row['TIPO_IDENTIFICACION']),
-            str(row['NIT_BENEFICIARIO']).replace('.0', ''),
-            row['NOMBRE_BENEFICIARIO'],
-            '37', # Código fijo de Tipo Transaccion en el formato
-            row['CODIGO_BANCO'],
-            str(row['NUMERO_CUENTA']).replace("'", "").replace("-", "").replace(" ", "").strip(),
-            '', '', '', '', # Columnas vacías del medio
-            row['VALOR_NETO_A_PAGAR'],
-            fecha_app
-        ])
+        # A: Tipo Documento
+        ws.cell(row=fila_actual, column=1).value = map_tipo_doc(row['TIPO_IDENTIFICACION'])
+        ws.cell(row=fila_actual, column=1).alignment = align_center
         
-    df_pab = pd.DataFrame(filas_pab)
-    df_pab.to_excel(output, index=False, header=False, sheet_name="FORMATOPAB")
+        # B: Nit Beneficiario (Se deja limpio como número para evitar errores de lectura del banco)
+        nit_val = str(row['NIT_BENEFICIARIO']).replace('.0', '').replace(r'\D', '')
+        try: nit_val = int(nit_val)
+        except: pass
+        ws.cell(row=fila_actual, column=2).value = nit_val
+        
+        # C: Nombre Beneficiario
+        ws.cell(row=fila_actual, column=3).value = str(row['NOMBRE_BENEFICIARIO']).strip()
+        
+        # D: Tipo Transacción (Siempre 37: Abono ahorros, como solicitaste)
+        ws.cell(row=fila_actual, column=4).value = 37
+        ws.cell(row=fila_actual, column=4).alignment = align_center
+        
+        # E: Código Banco
+        cod_banco = row['CODIGO_BANCO']
+        try: cod_banco = int(cod_banco)
+        except: pass
+        ws.cell(row=fila_actual, column=5).value = cod_banco
+        ws.cell(row=fila_actual, column=5).alignment = align_center
+        
+        # F: No Cuenta Beneficiario
+        cuenta_val = str(row['NUMERO_CUENTA']).replace("'", "").replace("-", "").replace(" ", "").strip()
+        try: cuenta_val = int(cuenta_val)
+        except: pass
+        ws.cell(row=fila_actual, column=6).value = cuenta_val
+        
+        # G a J: Quedan Vacíos automáticamente (Email, Documento Autorizado, Referencia, Celular Beneficiario)
+        
+        # K: Valor Transacción (El Neto real a pagar)
+        ws.cell(row=fila_actual, column=11).value = float(row['VALOR_NETO_A_PAGAR'])
+        ws.cell(row=fila_actual, column=11).number_format = '0'
+        
+        # L: Fecha de aplicación (YYYYMMDD)
+        ws.cell(row=fila_actual, column=12).value = int(fecha_app)
+        
+        fila_actual += 1
+        
+    output = io.BytesIO()
+    wb.save(output)
     return output.getvalue()
 
 # ==============================================================================
