@@ -106,9 +106,23 @@ def obtener_fecha_actual():
 def cargar_datos(url):
     try:
         req_url = f"{url}?t={int(datetime.now().timestamp())}"
-        response = requests.get(req_url)
+        response = requests.get(req_url, allow_redirects=True, timeout=15)
+        
+        if response.status_code != 200:
+            st.error(f"⚠️ Error de respuesta de Google Apps Script: Código {response.status_code}")
+            st.text(response.text[:500])
+            return None
+            
         return response.json()
+    except requests.exceptions.JSONDecodeError:
+        st.error("⚠️ El Apps Script respondió pero NO devolvió un JSON válido. Revisa los registros (Logs) de Apps Script.")
+        try:
+            st.text(response.text[:500])
+        except:
+            pass
+        return None
     except Exception as e:
+        st.error(f"⚠️ Error en la conexión HTTP: {e}")
         return None
 
 def guardar_en_historico(url, sheet_name, row_data):
@@ -1642,7 +1656,6 @@ with tab_rentabilidad:
             except Exception as e:
                 st.error(f"Error procesando el archivo: {e}")
 
-# Reimplementando la función para procesar rentabilidad general con el cruce arreglado
 def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre_pestana_bd, df_pagos_reales, corte_seleccionado, total_nomina_bd):
     try:
         xls = pd.ExcelFile(archivo)
