@@ -984,15 +984,17 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, 
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
-        # OUTER JOIN: Cruce bidireccional absoluto
+        if df_pagos_reales_rent.empty and '_cedula_clean' not in df_pagos_reales_rent.columns:
+            df_pagos_reales_rent = pd.DataFrame(columns=['_cedula_clean', 'VALOR_PAGADO_NETO', 'NOMBRE_EMPLEADO'])
+            
         df_cruce = pd.merge(cobro_agrupado, df_pagos_reales_rent, on='_cedula_clean', how='outer')
         df_cruce['TOTAL_COBRADO_LTSA'] = df_cruce['TOTAL_COBRADO_LTSA'].fillna(0)
         df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
         
-        if 'NOMBRE_EMPLEADO' not in df_cruce.columns and col_nombre_cobro in df_cruce.columns:
-            df_cruce['NOMBRE_EMPLEADO'] = df_cruce[col_nombre_cobro]
-        elif 'NOMBRE_EMPLEADO' in df_cruce.columns and col_nombre_cobro in df_cruce.columns:
+        if col_nombre_cobro in df_cruce.columns and 'NOMBRE_EMPLEADO' in df_cruce.columns:
             df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna(df_cruce[col_nombre_cobro])
+        elif 'NOMBRE_EMPLEADO' not in df_cruce.columns and col_nombre_cobro in df_cruce.columns:
+            df_cruce['NOMBRE_EMPLEADO'] = df_cruce[col_nombre_cobro]
             
         df_cruce['NOMBRE_EMPLEADO'] = df_cruce.get('NOMBRE_EMPLEADO', pd.Series(['S/N']*len(df_cruce))).fillna("S/N (Sin cobro/pago)")
         
@@ -1009,7 +1011,7 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, 
         else:
             df_cruce['CATEGORIA_VEHICULO'] = "NO DEFINIDO"
         
-        st.success(f"✅ Mostrando los **{len(df_cruce)}** registros de rentabilidad reales cruzados con Pagos.")
+        st.success(f"✅ Mostrando los **{len(df_cruce)}** registros de rentabilidad reales.")
         
         tab_emp, tab_veh, tab_alm = st.tabs(["👥 Rentabilidad por Empleado", "🛵 Rentabilidad por Vehículo", "🏢 Rentabilidad por Almacén"])
         
@@ -1101,6 +1103,7 @@ df_fuera = pd.DataFrame(data_cruda.get('fueras_perimetro', []))
 df_rent_hist = pd.DataFrame(data_cruda.get('rent_hist', []))
 df_rent_pollos = pd.DataFrame(data_cruda.get('rent_pollos', []))
 df_rent_directo = pd.DataFrame(data_cruda.get('rent_directo', []))
+df_rent_pollos_pago = pd.DataFrame(data_cruda.get('rent_pollos_pago', []))
 
 if df_pagos_completo.empty:
     st.warning("No se encontraron datos en la pestaña PAGOS PERSONAL POR SERVICIOS.")
@@ -1112,6 +1115,7 @@ if not df_fuera.empty: df_fuera.columns = df_fuera.columns.str.strip().str.upper
 if not df_rent_hist.empty: df_rent_hist.columns = df_rent_hist.columns.str.strip().str.upper()
 if not df_rent_pollos.empty: df_rent_pollos.columns = df_rent_pollos.columns.str.strip().str.upper()
 if not df_rent_directo.empty: df_rent_directo.columns = df_rent_directo.columns.str.strip().str.upper()
+if not df_rent_pollos_pago.empty: df_rent_pollos_pago.columns = df_rent_pollos_pago.columns.str.strip().str.upper()
 
 if 'CORTE' in df_pagos_completo.columns:
     df_pagos_completo['CORTE'] = df_pagos_completo['CORTE'].astype(str).str.strip().str.upper()
@@ -1551,11 +1555,7 @@ with tab_informes:
 # ==============================================================================
 with tab_rentabilidad:
     
-    # 1. Leer los periodos EXISTENTES en Rentabilidad LTSA y Pollos (ignora PAGO para la lista)
-    df_rent_pollos_pago = pd.DataFrame(data_cruda.get('rent_pollos_pago', []))
-    if not df_rent_pollos_pago.empty:
-        df_rent_pollos_pago.columns = df_rent_pollos_pago.columns.str.strip().str.upper()
-        
+    # 1. Leer los periodos EXISTENTES EXCLUSIVAMENTE de Rentabilidad LTSA y Pollos
     periodos_ltsa = df_rent_hist['PERIODO'].dropna().astype(str).str.strip().str.upper().tolist() if not df_rent_hist.empty and 'PERIODO' in df_rent_hist.columns else []
     periodos_pollos = df_rent_pollos['PERIODO'].dropna().astype(str).str.strip().str.upper().tolist() if not df_rent_pollos.empty and 'PERIODO' in df_rent_pollos.columns else []
     
@@ -1574,8 +1574,11 @@ with tab_rentabilidad:
         df_pagos_base = df_pagos_completo.copy()
     else:
         corte_evaluado_str = corte_a_evaluar
-        # Para LTSA, cruzamos contra la base general filtrada por el mismo nombre
+        # Para LTSA y Directo, cruzamos contra la base general filtrada por el mismo nombre
         df_pagos_base = df_pagos_completo[df_pagos_completo['CORTE'] == corte_a_evaluar].copy()
+        
+        if df_pagos_base.empty:
+            st.warning(f"⚠️ **Aviso Importante:** En la pestaña principal de 'Pagos Personal' no existe ningún corte llamado exactamente '{corte_a_evaluar}'. Por esta razón, el sistema asumirá que el Costo de Nómina es $0. Si deseas ver los costos, asegúrate de que el nombre del corte coincida.")
 
     # Recalculamos los PAGOS REALES GLOBALES (Para LTSA y Personal Directo)
     col_total_pagar = obtener_nombre_columna(df_pagos_base, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
@@ -1594,7 +1597,7 @@ with tab_rentabilidad:
         df_pagos_reales_rent = df_pagos_agrupados[df_pagos_agrupados['_cedula_clean'].isin(['nan', '', 'None']) == False]
         total_nomina_bd_rent = df_pagos_reales_rent['VALOR_PAGADO_NETO'].sum()
     else:
-        df_pagos_reales_rent = pd.DataFrame()
+        df_pagos_reales_rent = pd.DataFrame(columns=['_cedula_clean', 'VALOR_PAGADO_NETO', 'NOMBRE_EMPLEADO'])
         total_nomina_bd_rent = 0
 
     sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo"])
@@ -1645,7 +1648,7 @@ with tab_rentabilidad:
         else:
             st.info("No hay datos en la base de datos para mostrar. Sube el validador en el paso 1.")
 
-    # ------------------ POLLOS Y PANADERÍA (CON PESTAÑA PAGO) ------------------
+    # ------------------ POLLOS Y PANADERÍA (CON DOBLE PESTAÑA) ------------------
     with sub_pollos:
         st.markdown("#### 📤 1. Cargar Validador a la Base de Datos")
         c3, c4 = st.columns([1, 2])
@@ -1694,7 +1697,6 @@ with tab_rentabilidad:
             st.markdown(f"#### 📊 2. Tablero de Resultados (Corte: {corte_evaluado_str})")
             
         if not df_rent_pollos.empty:
-            # Aquí es donde le damos la inteligencia a Pollos: calculamos su nómina interna usando rent_pollos_pago
             if not df_rent_pollos_pago.empty:
                 if corte_evaluado_str != "GLOBAL":
                     col_per_pago = obtener_nombre_columna(df_rent_pollos_pago, ['PERIODO', 'CORTE'])
@@ -1717,15 +1719,13 @@ with tab_rentabilidad:
                         NOMBRE_EMPLEADO=(col_nom_p if col_nom_p else col_ced_p, 'first'),
                         VALOR_PAGADO_NETO=('_valor_pagar_num', 'sum')
                     ).reset_index()
-                    df_pagos_agrupados_pollos = df_pagos_agrupados_pollos[df_pagos_agrupados_pollos['_cedula_clean'] != '']
-                    
-                    df_pagos_reales_pollos = df_pagos_agrupados_pollos
+                    df_pagos_reales_pollos = df_pagos_agrupados_pollos[df_pagos_agrupados_pollos['_cedula_clean'] != '']
                     total_nomina_pollos = df_pagos_reales_pollos['VALOR_PAGADO_NETO'].sum()
                 else:
-                    df_pagos_reales_pollos = pd.DataFrame()
+                    df_pagos_reales_pollos = pd.DataFrame(columns=['_cedula_clean', 'VALOR_PAGADO_NETO', 'NOMBRE_EMPLEADO'])
                     total_nomina_pollos = 0
             else:
-                df_pagos_reales_pollos = pd.DataFrame()
+                df_pagos_reales_pollos = pd.DataFrame(columns=['_cedula_clean', 'VALOR_PAGADO_NETO', 'NOMBRE_EMPLEADO'])
                 total_nomina_pollos = 0
                 
             procesar_rentabilidad_db(df_rent_pollos, "Pollos y Panadería", df_pagos_reales_pollos, corte_evaluado_str, total_nomina_pollos, costo_label="Costo Nómina Real (Pestaña PAGO Pollos)")
