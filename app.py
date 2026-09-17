@@ -154,29 +154,24 @@ def generar_excel_pab(df_banco, corte_seleccionado):
     ws = wb.active
     ws.title = "FORMATOPAB"
     
-    # 1. Definir estilos idénticos al archivo original del banco
-    # El color "31869B" corresponde al azul/verde (Teal) técnico del formato
     fill_headers = PatternFill(start_color="31869B", end_color="31869B", fill_type="solid")
     font_headers = Font(color="FFFFFF", bold=True)
     align_center = Alignment(horizontal="center", vertical="center")
     
-    # 2. Configurar el ancho exacto de las columnas
     anchos = {'A': 26, 'B': 22, 'C': 25, 'D': 21, 'E': 28, 'F': 28, 'G': 28, 'H': 28, 'I': 20, 'J': 23, 'K': 25, 'L': 19}
     for col, width in anchos.items():
         ws.column_dimensions[col].width = width
 
-    # 3. Mapeo de Tipo de Documento Beneficiario (Regla estricta del banco)
     def map_tipo_doc(t):
         t = str(t).upper()
         if 'NIT' in t: return 3
         elif 'CE' in t or 'EXTRANJER' in t: return 2
         elif 'TI' in t or 'IDENTIDAD' in t: return 4
         elif 'PP' in t or 'PASAPORTE' in t: return 5
-        else: return 1 # 1: Cédula (Por defecto)
+        else: return 1
         
     fecha_app = datetime.now(timezone(timedelta(hours=-5))).strftime("%Y%m%d")
     
-    # 4. Construcción de Fila 1 (Encabezados Principales)
     headers_fila1 = ['NIT PAGADOR', 'TIPO DE PAGO', 'APLICACIÓN', 'SECUENCIA DE ENVÍO', 'NRO CUENTA A DEBITAR', 'TIPO DE CUENTA A DEBITAR', 'DESCRIPCIÓN DEL PAGO']
     for col_idx, header in enumerate(headers_fila1, start=1):
         cell = ws.cell(row=1, column=col_idx)
@@ -185,7 +180,6 @@ def generar_excel_pab(df_banco, corte_seleccionado):
         cell.font = font_headers
         cell.alignment = align_center
 
-    # 5. Construcción de Fila 2 (Valores Fijos PAB)
     desc_pago = f"SERVICOS {str(corte_seleccionado).upper()}"[:40]
     valores_fila2 = [900561833, 225, 'I', 'A1', 81016173001, 'D', desc_pago]
     for col_idx, val in enumerate(valores_fila2, start=1):
@@ -193,7 +187,6 @@ def generar_excel_pab(df_banco, corte_seleccionado):
         cell.value = val
         cell.alignment = align_center
 
-    # 6. Construcción de Fila 3 (Encabezados Beneficiarios)
     headers_fila3 = ['Tipo Documento Beneficiario', 'Nit Beneficiario', 'Nombre Beneficiario ', 'Tipo Transaccion ', 'Código Banco ', 'No Cuenta Beneficiario ', 'Email ', 'Documento Autorizado ', 'Referencia ', 'Celular Beneficiario', 'ValorTransaccion ', 'Fecha de aplicación']
     for col_idx, header in enumerate(headers_fila3, start=1):
         cell = ws.cell(row=3, column=col_idx)
@@ -202,48 +195,37 @@ def generar_excel_pab(df_banco, corte_seleccionado):
         cell.font = font_headers
         cell.alignment = align_center
 
-    # 7. Construcción de Datos Beneficiarios (Fila 4 en adelante)
     fila_actual = 4
     df_banco['CODIGO_BANCO'] = df_banco["BANCO_DESTINO"].map(CODIGOS_BANCOS).fillna("")
     
     for _, row in df_banco.iterrows():
-        # A: Tipo Documento
         ws.cell(row=fila_actual, column=1).value = map_tipo_doc(row['TIPO_IDENTIFICACION'])
         ws.cell(row=fila_actual, column=1).alignment = align_center
         
-        # B: Nit Beneficiario (Se deja limpio como número para evitar errores de lectura del banco)
         nit_val = str(row['NIT_BENEFICIARIO']).replace('.0', '').replace(r'\D', '')
         try: nit_val = int(nit_val)
         except: pass
         ws.cell(row=fila_actual, column=2).value = nit_val
         
-        # C: Nombre Beneficiario
         ws.cell(row=fila_actual, column=3).value = str(row['NOMBRE_BENEFICIARIO']).strip()
         
-        # D: Tipo Transacción (Siempre 37: Abono ahorros, como solicitaste)
         ws.cell(row=fila_actual, column=4).value = 37
         ws.cell(row=fila_actual, column=4).alignment = align_center
         
-        # E: Código Banco
         cod_banco = row['CODIGO_BANCO']
         try: cod_banco = int(cod_banco)
         except: pass
         ws.cell(row=fila_actual, column=5).value = cod_banco
         ws.cell(row=fila_actual, column=5).alignment = align_center
         
-        # F: No Cuenta Beneficiario
         cuenta_val = str(row['NUMERO_CUENTA']).replace("'", "").replace("-", "").replace(" ", "").strip()
         try: cuenta_val = int(cuenta_val)
         except: pass
         ws.cell(row=fila_actual, column=6).value = cuenta_val
         
-        # G a J: Quedan Vacíos automáticamente (Email, Documento Autorizado, Referencia, Celular Beneficiario)
-        
-        # K: Valor Transacción (El Neto real a pagar)
         ws.cell(row=fila_actual, column=11).value = float(row['VALOR_NETO_A_PAGAR'])
         ws.cell(row=fila_actual, column=11).number_format = '0'
         
-        # L: Fecha de aplicación (YYYYMMDD)
         ws.cell(row=fila_actual, column=12).value = int(fecha_app)
         
         fila_actual += 1
@@ -718,7 +700,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
         
     if 'NIT' in tipo_doc_raw: tipo_doc_pab = 'NIT'
     elif 'CE' in tipo_doc_raw or 'EXTRANJ' in tipo_doc_raw: tipo_doc_pab = 'CE'
-    elif 'PASAPORTE' in tipo_doc_raw or 'PP' in tipo_doc_raw: tipo_doc_pab = 'PP'
+    elif 'PASAPORTE' in tipo_doc_raw or 'PP' in tipo_doc_pab: tipo_doc_pab = 'PP'
     else: tipo_doc_pab = 'CC'
     
     nombre_prestador = str(row_titular.get(col_prestador, 'S/N')).strip()
@@ -858,7 +840,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
 # ==============================================================================
 # FUNCIÓN AUXILIAR DE RENTABILIDAD (100% REAL, BASADA EN GOOGLE SHEETS)
 # ==============================================================================
-def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre_pestana_bd, df_pagos_reales, corte_seleccionado):
+def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre_pestana_bd, df_pagos_reales, corte_seleccionado, total_nomina_bd):
     try:
         xls = pd.ExcelFile(archivo)
         hoja_objetivo = None
@@ -915,7 +897,7 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
-        # CRUZAMOS CON LO QUE REALMENTE SE PAGÓ EN GOOGLE SHEETS
+        # CRUZAMOS CON LO QUE REALMENTE SE PAGÓ EN GOOGLE SHEETS (Usando la cédula del conductor)
         df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='left')
         
         df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
@@ -931,14 +913,15 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         
         if col_vehiculo:
             df_cruce['CATEGORIA_VEHICULO'] = df_cruce[col_vehiculo].apply(lambda x: 
-                "MOTO CARGUERO" if "CARGUERO" in str(x).upper() 
-                else "MOTO" if "MOTO" in str(x).upper() 
-                else "CARRY / CARRO"
+                "MOTO CARGUERO" if pd.notna(x) and "CARGUERO" in str(x).upper() 
+                else "MOTO" if pd.notna(x) and "MOTO" in str(x).upper() 
+                else "CARRY / CARRO" if pd.notna(x)
+                else "NO IDENTIFICADO"
             )
         else:
             df_cruce['CATEGORIA_VEHICULO'] = "NO DEFINIDO"
         
-        st.success(f"✅ Datos cruzados exactamente con los pagos reales de Sheets. Mostrando los **{len(df_cruce)}** registros encontrados.")
+        st.success(f"✅ Datos cruzados exactamente con los pagos reales de Sheets (por conductor). Mostrando los **{len(df_cruce)}** registros encontrados.")
         
         tab_emp, tab_veh, tab_alm = st.tabs(["👥 Rentabilidad por Empleado", "🛵 Rentabilidad por Vehículo", "🏢 Rentabilidad por Almacén"])
         
@@ -982,14 +965,19 @@ def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre
         
         st.divider()
         st.markdown(f"### 💰 Gran Total Quincena ({titulo_modulo})")
-        r1, r2, r3 = st.columns(3)
+        r1, r2, r3, r4 = st.columns(4)
+        
         tot_cobrado = float(df_cruce['TOTAL_COBRADO_LTSA'].sum())
         tot_pagado = float(df_cruce['VALOR_PAGADO_NETO'].sum())
         tot_utilidad = float(df_cruce['UTILIDAD_REAL_NETA'].sum())
         
-        r1.metric("Total Cobrado/Facturado", f"${tot_cobrado:,.0f}")
-        r2.metric("Total Pagado (Google Sheets)", f"${tot_pagado:,.0f}")
-        r3.metric("UTILIDAD REAL NETA", f"${tot_utilidad:,.0f}")
+        # El balance maestro para probar que todo el dinero está registrado
+        nomina_no_asociada = total_nomina_bd - tot_pagado
+        
+        r1.metric("Total Facturado al Cliente", f"${tot_cobrado:,.0f}")
+        r2.metric("Costo Nómina (Cruzada)", f"${tot_pagado:,.0f}")
+        r3.metric("UTILIDAD NETA", f"${tot_utilidad:,.0f}")
+        r4.metric("Nómina otros clientes (No cruzada)", f"${nomina_no_asociada:,.0f}")
         
         st.divider()
         st.markdown(f"### 💾 Guardar Trazabilidad Histórica ({titulo_modulo})")
@@ -1384,7 +1372,6 @@ with tab_informes:
         if col_horas_inf:
             df_informe[col_horas_inf] = pd.to_numeric(df_informe[col_horas_inf], errors='coerce').fillna(0)
         
-        # Limpieza estandarizada para cruces correctos en los gráficos
         df_informe['_ced_prestador_clean'] = df_informe[col_cedula_prestador].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         df_informe['_ced_banco_clean'] = df_informe[col_cedula_banco].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         
@@ -1527,26 +1514,35 @@ with tab_rentabilidad:
     st.markdown("### 📈 Módulo de Rentabilidad Operativa (Basado 100% en Hechos)")
     
     if "df_pagos_reales" not in st.session_state or st.session_state.get('corte_procesado') != corte_seleccionado:
-        # Aquí tomamos DIRECTAMENTE la información de Google Sheets (lo que ella paga de su bolsillo)
+        # Aquí tomamos DIRECTAMENTE la información de Google Sheets
         col_total_pagar = obtener_nombre_columna(df_pagos_corte, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
         
-        if col_total_pagar:
+        # FIX PRINCIPAL: Usar la cédula y nombre del CONDUCTOR (no la del prestador de la flota)
+        col_ced_conductor = obtener_nombre_columna(df_pagos_corte, ['CÉDULA', 'CEDULA', 'C.C.', 'CC'])
+        col_nombre_conductor = obtener_nombre_columna(df_pagos_corte, ['CONDUCTOR', 'NOMBRES', 'NOMBRE'])
+        
+        if col_total_pagar and col_ced_conductor:
             df_pagos_corte['_valor_pagar_num'] = df_pagos_corte[col_total_pagar].apply(limpiar_dinero)
             
-            df_pagos_agrupados = df_pagos_corte.groupby('_ced_prestador_clean').agg(
-                NOMBRE_EMPLEADO=(col_prestador, 'first'),
+            # Limpiamos la cédula del conductor para garantizar un cruce perfecto
+            df_pagos_corte['_cedula_clean'] = df_pagos_corte[col_ced_conductor].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
+            
+            # Agrupamos los pagos enfocados al CONDUCTOR (Lo que nos soluciona el descuadre)
+            df_pagos_agrupados = df_pagos_corte.groupby('_cedula_clean').agg(
+                NOMBRE_EMPLEADO=(col_nombre_conductor if col_nombre_conductor else col_prestador, 'first'),
                 VALOR_PAGADO_NETO=('_valor_pagar_num', 'sum')
             ).reset_index()
             
-            df_pagos_agrupados.rename(columns={'_ced_prestador_clean': '_cedula_clean'}, inplace=True)
             df_pagos_agrupados = df_pagos_agrupados[df_pagos_agrupados['_cedula_clean'].isin(['nan', '', 'None']) == False]
             
             st.session_state.df_pagos_reales = df_pagos_agrupados
+            st.session_state.total_nomina_bd = df_pagos_agrupados['VALOR_PAGADO_NETO'].sum() # Guardar nómina total para métrica
             st.session_state.corte_procesado = corte_seleccionado
         else:
-            st.error("No se detectó una columna de 'TOTAL A PAGAR' en la hoja para consolidar los pagos.")
+            st.error("No se detectaron las columnas de CÉDULA o TOTAL A PAGAR en la hoja de pagos.")
 
     df_pagos_reales = st.session_state.df_pagos_reales
+    total_nomina_bd = st.session_state.total_nomina_bd
 
     sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo (Cruce)"])
     
@@ -1554,13 +1550,13 @@ with tab_rentabilidad:
         st.info("Sube el **Cuadro Validador (LTSA)**. El sistema cruzará lo que vas a COBRAR ahí, con lo que vas a PAGAR (según la pestaña de pagos actual).")
         archivo_ltsa = st.file_uploader("📥 Subir archivo Validador (LTSA)", type=["xlsx", "xls"], key="file_ltsa")
         if archivo_ltsa is not None:
-            renderizar_modulo_rentabilidad(archivo_ltsa, 'REPORTE', "LTSA", "RENTABILIDAD_HISTORICA", df_pagos_reales, corte_seleccionado)
+            renderizar_modulo_rentabilidad(archivo_ltsa, 'REPORTE', "LTSA", "RENTABILIDAD_HISTORICA", df_pagos_reales, corte_seleccionado, total_nomina_bd)
 
     with sub_pollos:
         st.info("Sube el **Cuadro Validador (POLLOS)**. El sistema cruzará lo facturado allí vs lo pagado en la base de datos.")
         archivo_pollos = st.file_uploader("📥 Subir archivo Validador (POLLOS)", type=["xlsx", "xls"], key="file_pollos")
         if archivo_pollos is not None:
-            renderizar_modulo_rentabilidad(archivo_pollos, 'COBRO', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado)
+            renderizar_modulo_rentabilidad(archivo_pollos, 'COBRO', "Pollos y Panadería", "RENTABILIDAD_POLLOS_PANADERIA", df_pagos_reales, corte_seleccionado, total_nomina_bd)
 
     with sub_directo:
         st.info("Sube el **Listado de Personal Directo** para filtrar y comparar de forma exclusiva la Utilidad Real (Cobrado en Validador vs Pagado en Sheets) de este personal.")
@@ -1591,16 +1587,12 @@ with tab_rentabilidad:
                             
                             df_ltsa['TOTAL_COBRADO'] = pd.to_numeric(df_ltsa[col_tot_ltsa], errors='coerce').fillna(0)
                             
-                            # Agrupamos lo cobrado por persona
                             ltsa_grouped = df_ltsa.groupby('_cedula_clean')['TOTAL_COBRADO'].sum().reset_index()
                             
-                            # Cruzamos con la realidad total de los pagos
+                            # Cruce "Outer" porque aquí sí medimos TODO
                             df_cruce_directo = pd.merge(ltsa_grouped, df_pagos_reales, on='_cedula_clean', how='outer').fillna(0)
                             
-                            # Marcamos quién es directo
                             df_cruce_directo['Tipo_Contratacion'] = df_cruce_directo['_cedula_clean'].isin(cedulas_planta).map({True: 'Directo (Planta)', False: 'Tercero'})
-                            
-                            # Utilidad exacta y estricta
                             df_cruce_directo['UTILIDAD_REAL'] = df_cruce_directo['TOTAL_COBRADO'] - df_cruce_directo['VALOR_PAGADO_NETO']
                             
                             t_fact = float(df_cruce_directo['TOTAL_COBRADO'].sum())
@@ -1649,3 +1641,160 @@ with tab_rentabilidad:
                     st.error("No se encontró la columna de IDENTIFICACIÓN o CÉDULA en el archivo listado.")
             except Exception as e:
                 st.error(f"Error procesando el archivo: {e}")
+
+# Reimplementando la función para procesar rentabilidad general con el cruce arreglado
+def renderizar_modulo_rentabilidad(archivo, sheet_buscada, titulo_modulo, nombre_pestana_bd, df_pagos_reales, corte_seleccionado, total_nomina_bd):
+    try:
+        xls = pd.ExcelFile(archivo)
+        hoja_objetivo = None
+        
+        posibles_nombres = [sheet_buscada, 'REPORTE', 'COBRO', 'BASE', 'DATOS']
+        for nombre in posibles_nombres:
+            if nombre in xls.sheet_names:
+                hoja_objetivo = nombre
+                break
+                
+        if not hoja_objetivo:
+            for sh in xls.sheet_names:
+                df_test = pd.read_excel(archivo, sheet_name=sh, nrows=15, header=None)
+                if df_test.astype(str).apply(lambda col: col.str.contains('CEDULA|CÉDULA|IDENTIFICACION|IDENTIFICACIÓN', case=False, na=False)).any().any():
+                    hoja_objetivo = sh
+                    break
+                    
+        if not hoja_objetivo:
+            hoja_objetivo = xls.sheet_names[0]
+
+        df_temp = pd.read_excel(archivo, sheet_name=hoja_objetivo, nrows=15, header=None)
+        fila_header = 4  
+        for idx, fila in df_temp.iterrows():
+            textos = fila.astype(str).str.upper().tolist()
+            if any(col in textos for col in ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN']):
+                fila_header = idx
+                break
+
+        df_cobro = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
+        df_cobro.columns = df_cobro.columns.str.strip().str.upper()
+        
+        if titulo_modulo == "LTSA":
+            st.session_state['df_raw_LTSA'] = df_cobro.copy()
+            
+        col_ced_cobro = obtener_nombre_columna(df_cobro, ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN'])
+        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR', 'NETO'])
+        col_vehiculo = obtener_nombre_columna(df_cobro, ['TIPO DE VEHICULO', 'VEHICULO', 'CATEGORIA'])
+        col_almacen = obtener_nombre_columna(df_cobro, ['PUNTO DE VENTA', 'ALMACEN', 'CLIENTE'])
+        col_nombre_cobro = obtener_nombre_columna(df_cobro, ['NOMBRE', 'NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO']) 
+        
+        if not (col_ced_cobro and col_total_cobro):
+            st.error(f"No se encontraron columnas de Cédula o Total en la hoja procesada ({hoja_objetivo}). Verifica el formato del archivo.")
+            return
+
+        df_cobro = df_cobro.dropna(subset=[col_ced_cobro])
+        df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
+        df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
+        
+        agg_dict = { col_total_cobro: 'sum' }
+        if col_vehiculo: agg_dict[col_vehiculo] = 'first'
+        if col_almacen: agg_dict[col_almacen] = 'first'
+        if col_nombre_cobro: agg_dict[col_nombre_cobro] = 'first'
+        
+        cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
+        cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
+        
+        # CRUZAMOS CON LO QUE REALMENTE SE PAGÓ EN GOOGLE SHEETS
+        df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='left')
+        
+        df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
+        
+        if col_nombre_cobro:
+            df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna(df_cruce[col_nombre_cobro])
+        else:
+            df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna("S/N (Sin cobro en BD)")
+        
+        df_cruce['UTILIDAD_REAL_NETA'] = df_cruce['TOTAL_COBRADO_LTSA'] - df_cruce['VALOR_PAGADO_NETO']
+        df_cruce['MARGEN_REAL'] = (df_cruce['UTILIDAD_REAL_NETA'] / df_cruce['TOTAL_COBRADO_LTSA'].replace(0, 1)).fillna(0)
+        
+        if col_vehiculo:
+            df_cruce['CATEGORIA_VEHICULO'] = df_cruce[col_vehiculo].apply(lambda x: 
+                "MOTO CARGUERO" if pd.notna(x) and "CARGUERO" in str(x).upper() 
+                else "MOTO" if pd.notna(x) and "MOTO" in str(x).upper() 
+                else "CARRY / CARRO" if pd.notna(x)
+                else "NO IDENTIFICADO"
+            )
+        else:
+            df_cruce['CATEGORIA_VEHICULO'] = "NO DEFINIDO"
+        
+        st.success(f"✅ Datos cruzados exactamente con los pagos reales de Sheets. Mostrando los **{len(df_cruce)}** registros encontrados.")
+        
+        tab_emp, tab_veh, tab_alm = st.tabs(["👥 Rentabilidad por Empleado", "🛵 Rentabilidad por Vehículo", "🏢 Rentabilidad por Almacén"])
+        
+        format_dict = {
+            'TOTAL_COBRADO_LTSA': '${:,.0f}', 'VALOR_PAGADO_NETO': '${:,.0f}',
+            'UTILIDAD_REAL_NETA': '${:,.0f}', 'MARGEN_REAL': '{:.1%}'
+        }
+
+        with tab_emp:
+            st.markdown("#### Detalle Real por Colaborador")
+            df_show_emp = df_cruce[['_cedula_clean', 'NOMBRE_EMPLEADO', 'CATEGORIA_VEHICULO', 'TOTAL_COBRADO_LTSA', 'VALOR_PAGADO_NETO', 'UTILIDAD_REAL_NETA', 'MARGEN_REAL']].sort_values('UTILIDAD_REAL_NETA', ascending=False)
+            
+            styler_emp = df_show_emp.style.format(format_dict)
+            try:
+                if hasattr(styler_emp, 'map'):
+                    styler_emp = styler_emp.map(lambda x: 'color: #E3000F' if x < 0 else 'color: #15803d', subset=['UTILIDAD_REAL_NETA'])
+                else:
+                    styler_emp = styler_emp.applymap(lambda x: 'color: #E3000F' if x < 0 else 'color: #15803d', subset=['UTILIDAD_REAL_NETA'])
+                st.dataframe(styler_emp, hide_index=True, use_container_width=True, height=400)
+            except Exception:
+                st.dataframe(df_show_emp, hide_index=True, use_container_width=True, height=400)
+            
+        with tab_veh:
+            st.markdown("#### Rentabilidad Consolidada por Vehículo")
+            df_veh_agg = df_cruce.groupby('CATEGORIA_VEHICULO').agg({
+                'TOTAL_COBRADO_LTSA': 'sum', 'VALOR_PAGADO_NETO': 'sum', 'UTILIDAD_REAL_NETA': 'sum'
+            }).reset_index()
+            df_veh_agg['MARGEN_REAL'] = (df_veh_agg['UTILIDAD_REAL_NETA'] / df_veh_agg['TOTAL_COBRADO_LTSA'].replace(0, 1)).fillna(0)
+            st.dataframe(df_veh_agg.style.format(format_dict), hide_index=True, use_container_width=True)
+            
+        with tab_alm:
+            if col_almacen:
+                st.markdown("#### Rentabilidad Consolidada por Almacén")
+                df_alm_agg = df_cruce.groupby(col_almacen).agg({
+                    'TOTAL_COBRADO_LTSA': 'sum', 'VALOR_PAGADO_NETO': 'sum', 'UTILIDAD_REAL_NETA': 'sum'
+                }).reset_index().sort_values('UTILIDAD_REAL_NETA', ascending=False)
+                df_alm_agg['MARGEN_REAL'] = (df_alm_agg['UTILIDAD_REAL_NETA'] / df_alm_agg['TOTAL_COBRADO_LTSA'].replace(0, 1)).fillna(0)
+                st.dataframe(df_alm_agg.style.format(format_dict), hide_index=True, use_container_width=True, height=400)
+            else:
+                st.info("No se encontró columna de almacén en este validador.")
+        
+        st.divider()
+        st.markdown(f"### 💰 Gran Total Quincena ({titulo_modulo})")
+        
+        # ==== LA PRUEBA REINA PARA DOÑA YESENIA ====
+        r1, r2, r3, r4 = st.columns(4)
+        tot_cobrado = float(df_cruce['TOTAL_COBRADO_LTSA'].sum())
+        tot_pagado = float(df_cruce['VALOR_PAGADO_NETO'].sum())
+        tot_utilidad = float(df_cruce['UTILIDAD_REAL_NETA'].sum())
+        
+        nomina_no_asociada = total_nomina_bd - tot_pagado
+        
+        r1.metric("Facturación Cliente", f"${tot_cobrado:,.0f}")
+        r2.metric("Costo Nómina (Cruzada)", f"${tot_pagado:,.0f}")
+        r3.metric("UTILIDAD NETA", f"${tot_utilidad:,.0f}")
+        r4.metric("Nómina otros clientes", f"${nomina_no_asociada:,.0f}")
+        # ==========================================
+        
+        st.divider()
+        st.markdown(f"### 💾 Guardar Trazabilidad Histórica ({titulo_modulo})")
+        if st.button(f"Guardar Consolidado {titulo_modulo} en la Nube", type="primary", key=f"btn_save_{titulo_modulo}", use_container_width=True):
+            fecha_registro = datetime.now(timezone(timedelta(hours=-5))).strftime("%Y-%m-%d %H:%M")
+            row_to_save = [fecha_registro, corte_seleccionado, tot_cobrado, tot_pagado, tot_utilidad]
+            
+            with st.spinner("Conectando con Google Sheets..."):
+                resultado = guardar_en_historico(GAS_URL, nombre_pestana_bd, row_to_save)
+                
+            if resultado.get("status") == "success":
+                st.success(f"¡Excelente! Los datos se han guardado permanentemente en la hoja {nombre_pestana_bd}.")
+            else:
+                st.error(f"Error al guardar: {resultado.get('message')}")
+
+    except Exception as e:
+        st.error(f"Error procesando el archivo: {e}")
