@@ -121,7 +121,6 @@ def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False, replace_p
         "bulk_data": bulk_data
     }
     try:
-        # Aumentamos el timeout a 90 segundos para darle tiempo a Google Scripts de borrar duplicados
         response = requests.post(url, json=payload, allow_redirects=True, timeout=90)
         if response.status_code != 200:
             return {"status": "error", "message": f"HTTP {response.status_code}: {response.text[:100]}"}
@@ -129,7 +128,6 @@ def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False, replace_p
             return response.json()
         except ValueError:
             return {"status": "error", "message": f"Respuesta no válida del servidor: {response.text[:100]}"}
-            
     except requests.exceptions.Timeout:
         return {"status": "error", "message": "El servidor de Google tardó demasiado en responder. Intenta sincronizar la base de datos para ver si los datos llegaron."}
     except Exception as e:
@@ -256,7 +254,7 @@ def get_pdf_bytes(pdf_obj):
     return out.encode('latin-1') if isinstance(out, str) else bytes(out)
 
 # ==============================================================================
-# GENERACIÓN DE ARCHIVO EXCEL PAB (ESTRUCTURA IDÉNTICA AL FORMATO)
+# GENERACIÓN DE EXCEL PAB Y PDFS (SE MANTIENE INTACTO)
 # ==============================================================================
 def generar_excel_pab(df_banco, corte_seleccionado):
     wb = openpyxl.Workbook()
@@ -338,9 +336,6 @@ def generar_excel_pab(df_banco, corte_seleccionado):
     wb.save(output)
     return output.getvalue()
 
-# ==============================================================================
-# LÓGICA DE PDFS 
-# ==============================================================================
 def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.add_page()
     pdf.set_text_color(0, 0, 0)
@@ -947,7 +942,6 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte
             df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_seleccionado).strip().upper()].copy()
         else:
             df_cobro = df_cobro_raw.copy()
-            st.warning(f"No se detectó columna de PERIODO en la tabla de {titulo_modulo}. Se evaluará toda la tabla.")
 
         if df_cobro.empty:
             st.warning(f"No hay registros en la base de datos de {titulo_modulo} para el corte '{corte_seleccionado}'.")
@@ -968,7 +962,6 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte
 
         df_cobro = df_cobro.dropna(subset=[col_ced_cobro])
         df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
-        # Filtro de limpieza para no graficar filas fantasmas
         df_cobro = df_cobro[df_cobro['_cedula_clean'] != '']
         
         df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
@@ -981,19 +974,22 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
-        df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='left')
+        df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='outer')
+        df_cruce['TOTAL_COBRADO_LTSA'] = df_cruce['TOTAL_COBRADO_LTSA'].fillna(0)
         df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
         
-        if col_nombre_cobro:
+        if col_nombre_cobro in df_cruce.columns and 'NOMBRE_EMPLEADO' in df_cruce.columns:
             df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna(df_cruce[col_nombre_cobro])
-        else:
-            df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna("S/N (Sin cobro en BD)")
+        elif 'NOMBRE_EMPLEADO' not in df_cruce.columns and col_nombre_cobro in df_cruce.columns:
+            df_cruce['NOMBRE_EMPLEADO'] = df_cruce[col_nombre_cobro]
+            
+        df_cruce['NOMBRE_EMPLEADO'] = df_cruce.get('NOMBRE_EMPLEADO', pd.Series(['S/N']*len(df_cruce))).fillna("S/N (Sin cobro/pago)")
         
         df_cruce['UTILIDAD_REAL_NETA'] = df_cruce['TOTAL_COBRADO_LTSA'] - df_cruce['VALOR_PAGADO_NETO']
         df_cruce['MARGEN_REAL'] = (df_cruce['UTILIDAD_REAL_NETA'] / df_cruce['TOTAL_COBRADO_LTSA'].replace(0, 1)).fillna(0)
         
         if col_vehiculo:
-            df_cruce['CATEGORIA_VEHICULO'] = df_cruce[col_vehiculo].apply(lambda x: 
+            df_cruce['CATEGORIA_VEHICULO'] = df_cruce.get(col_vehiculo, pd.Series(["NO DEFINIDO"]*len(df_cruce))).apply(lambda x: 
                 "MOTO CARGUERO" if pd.notna(x) and "CARGUERO" in str(x).upper() 
                 else "MOTO" if pd.notna(x) and "MOTO" in str(x).upper() 
                 else "CARRY / CARRO" if pd.notna(x)
@@ -1592,7 +1588,7 @@ with tab_rentabilidad:
             btn_disabled = (per_ltsa_clean in periodos_existentes) and not reemplazar_ltsa
             
             if st.button("🚀 Enviar a Google Sheets (LTSA)", use_container_width=True, type="primary", disabled=btn_disabled):
-                with st.spinner("Preparando archivo y subiendo a la nube (Puede tardar un par de minutos)..."):
+                with st.spinner("Preparando archivo y subiendo a la nube (Puede tardar hasta 1 minuto)..."):
                     df_raw_ltsa = extraer_df_desde_excel(file_ltsa, 'REPORTE')
                     cols_ltsa_gsheets = ['ORIGEN', 'PUNTO DE VENTA', 'OPERACIÓN', 'CÓDIGO', 'CIUDAD ORIGEN', 'CIUDAD DESTINO', 'CEDULA', 'NOMBRE', 'TIPO DE VEHICULO', 'PLACA', 'ESTADO', 'CONCEPTO TARIFA', 'TARIFA', 'Días/Horas', 'TOTAL', 'OBSERVACION OP', 'OBSERVACIONES ÉXITO', 'HORAS RVS', 'DIFERENCIA', 'TOTAL FACTURAR', 'OBSERVACIÓN', 'OPERADOR', 'PERIODO']
                     
@@ -1601,7 +1597,7 @@ with tab_rentabilidad:
                     res_ltsa = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_HISTORICA", bulk_data_ltsa, clear_first=False, replace_period=param_replace)
                     
                     if res_ltsa.get('status') == 'success':
-                        st.success("✅ ¡Datos inyectados exitosamente! Sincronizando...")
+                        st.success("✅ ¡Datos inyectados exitosamente! Refrescando tablero automáticamente...")
                         cargar_datos.clear()
                         st.cache_data.clear()
                         st.rerun()
@@ -1634,7 +1630,7 @@ with tab_rentabilidad:
             btn_disabled_p = (per_pollos_clean in periodos_existentes_p) and not reemplazar_pollos
 
             if st.button("🚀 Enviar a Google Sheets (POLLOS)", use_container_width=True, type="primary", disabled=btn_disabled_p):
-                with st.spinner("Preparando archivo y subiendo a la nube (Puede tardar un par de minutos)..."):
+                with st.spinner("Preparando archivo y subiendo a la nube (Puede tardar hasta 1 minuto)..."):
                     df_raw_pollos = extraer_df_desde_excel(file_pollos, 'COBRO')
                     cols_pollos_gsheets = ['ORIGEN', 'PUNTO DE VENTA', 'OPERACIÓN', 'CÓDIGO', 'CIUDAD ORIGEN', 'CIUDAD DESTINO', 'CEDULA', 'NOMBRE', 'TIPO DE VEHICULO', 'PLACA', 'ESTADO', 'CONCEPTO TARIFA', 'TARIFA', 'Días/Horas', 'TOTAL', 'OBSERVACION OP', 'OBSERVACIONES ÉXITO', 'HORAS RVS', 'DIFERENCIA', 'TOTAL FACTURAR', 'OBSERVACIÓN', 'OPERADOR', 'PERIODO']
                     
@@ -1643,7 +1639,7 @@ with tab_rentabilidad:
                     res_pollos = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_POLLOS_PANADERIA", bulk_data_pollos, clear_first=False, replace_period=param_replace_p)
                     
                     if res_pollos.get('status') == 'success':
-                        st.success("✅ ¡Datos inyectados exitosamente! Sincronizando...")
+                        st.success("✅ ¡Datos inyectados exitosamente! Refrescando tablero automáticamente...")
                         cargar_datos.clear()
                         st.cache_data.clear()
                         st.rerun()
@@ -1666,7 +1662,7 @@ with tab_rentabilidad:
         
         if file_directo:
             if st.button("🚀 Enviar a Google Sheets (PERSONAL DIRECTO)", use_container_width=True, type="primary"):
-                with st.spinner("Preparando archivo y subiendo a la nube (Puede tardar un par de minutos)..."):
+                with st.spinner("Preparando archivo y subiendo a la nube (Puede tardar hasta 1 minuto)..."):
                     df_raw_directo = extraer_df_desde_excel(file_directo)
                     cols_directo_gsheets = ['NOMBRE COMPLETO', 'CÓDIGO INGRESO', 'IDENTIFICACIÓN', 'ACTIVO', 'FECHA DE INGRESO', 'NÓMINA', 'CENTRO DE COSTOS', 'NOMBRE CENTRO COSTO', 'FECHA DE RETIRO']
                     
@@ -1674,7 +1670,7 @@ with tab_rentabilidad:
                     res_directo = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_PERSONAL_DIRECTO", bulk_data_directo, clear_first=limpiar_directo)
                     
                     if res_directo.get('status') == 'success':
-                        st.success("✅ ¡Lista inyectada exitosamente! Sincronizando...")
+                        st.success("✅ ¡Lista inyectada exitosamente! Refrescando tablero automáticamente...")
                         cargar_datos.clear()
                         st.cache_data.clear()
                         st.rerun()
