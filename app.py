@@ -85,9 +85,6 @@ st.markdown("""
 
 GAS_URL = "https://script.google.com/macros/s/AKfycbzUT0gAjxyq4bCDGo06siBJya4C9OHDRwAEL_igBG_gJK19DIJCIkgmCYH819BTym1u/exec"
 
-# ==============================================================================
-# DICCIONARIO DE BANCOS 
-# ==============================================================================
 CODIGOS_BANCOS = {
     "BANCO DE BOGOTA": "1", "BANCO POPULAR": "2", "BANCOLOMBIA": "7",
     "DAVIVIENDA": "51", "BANCO DE OCCIDENTE": "23", "BANCO CAJA SOCIAL": "32",
@@ -107,31 +104,87 @@ def cargar_datos(url):
     try:
         req_url = f"{url}?t={int(datetime.now().timestamp())}"
         response = requests.get(req_url, allow_redirects=True, timeout=15)
-        
         if response.status_code != 200:
             st.error(f"⚠️ Error de respuesta de Google Apps Script: Código {response.status_code}")
-            st.text(response.text[:500])
             return None
-            
         return response.json()
-    except requests.exceptions.JSONDecodeError:
-        st.error("⚠️ El Apps Script respondió pero NO devolvió un JSON válido. Revisa los registros (Logs) de Apps Script.")
-        try:
-            st.text(response.text[:500])
-        except:
-            pass
-        return None
     except Exception as e:
         st.error(f"⚠️ Error en la conexión HTTP: {e}")
         return None
 
-def guardar_en_historico(url, sheet_name, row_data):
-    payload = {"sheet_name": sheet_name, "row_data": row_data}
+def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False):
+    payload = {
+        "sheet_name": sheet_name,
+        "clear_first": clear_first,
+        "bulk_data": bulk_data
+    }
     try:
         response = requests.post(url, json=payload)
         return response.json()
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+def extraer_df_desde_excel(archivo, sheet_buscada=None):
+    xls = pd.ExcelFile(archivo)
+    hoja_objetivo = None
+    posibles = [sheet_buscada, 'REPORTE', 'COBRO', 'BASE', 'DATOS'] if sheet_buscada else ['REPORTE', 'COBRO', 'BASE', 'DATOS']
+    
+    for nombre in posibles:
+        if nombre and nombre in xls.sheet_names:
+            hoja_objetivo = nombre
+            break
+            
+    if not hoja_objetivo:
+        for sh in xls.sheet_names:
+            df_test = pd.read_excel(archivo, sheet_name=sh, nrows=15, header=None)
+            if df_test.astype(str).apply(lambda col: col.str.contains('CEDULA|CÉDULA|IDENTIFICACION|IDENTIFICACIÓN', case=False, na=False)).any().any():
+                hoja_objetivo = sh
+                break
+                
+    if not hoja_objetivo: hoja_objetivo = xls.sheet_names[0]
+
+    df_temp = pd.read_excel(archivo, sheet_name=hoja_objetivo, nrows=15, header=None)
+    fila_header = 0
+    for idx, fila in df_temp.iterrows():
+        textos = fila.astype(str).str.upper().tolist()
+        if any(col in textos for col in ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION', 'IDENTIFICACIÓN', 'NOMBRE COMPLETO']):
+            fila_header = idx
+            break
+
+    df = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
+    df.columns = df.columns.astype(str).str.strip().str.upper()
+    return df
+
+def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
+    df_out = pd.DataFrame()
+    for col in cols_esperadas:
+        if col == 'PERIODO' and periodo:
+            df_out[col] = periodo
+        else:
+            alias = [col]
+            if col == 'CEDULA' or col == 'IDENTIFICACIÓN': 
+                alias.extend(['CÉDULA', 'C.C.', 'IDENTIFICACION', 'DOCUMENTO', 'CC'])
+            elif col == 'NOMBRE' or col == 'NOMBRE COMPLETO': 
+                alias.extend(['NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO'])
+            elif col == 'TOTAL FACTURAR': 
+                alias.extend(['TOTAL', 'VALOR TOTAL', 'NETO', 'VALOR_TOTAL'])
+            elif col == 'TIPO DE VEHICULO': 
+                alias.extend(['VEHICULO', 'CATEGORIA'])
+            elif col == 'PUNTO DE VENTA': 
+                alias.extend(['ALMACEN', 'CLIENTE', 'PUNTO_VENTA'])
+            
+            col_found = obtener_nombre_columna(df_raw, alias)
+            if col_found:
+                df_out[col] = df_raw[col_found]
+            else:
+                df_out[col] = ""
+                
+    df_out = df_out.fillna("")
+    for c in ['CEDULA', 'IDENTIFICACIÓN']:
+        if c in df_out.columns:
+            df_out[c] = df_out[c].astype(str).str.replace(r'\.0$', '', regex=True).str.replace('nan', '', regex=True).str.strip()
+            
+    return df_out.values.tolist()
 
 def limpiar_dinero(val):
     if pd.isna(val) or val == "": return 0.0
@@ -220,9 +273,7 @@ def generar_excel_pab(df_banco, corte_seleccionado):
         try: nit_val = int(nit_val)
         except: pass
         ws.cell(row=fila_actual, column=2).value = nit_val
-        
         ws.cell(row=fila_actual, column=3).value = str(row['NOMBRE_BENEFICIARIO']).strip()
-        
         ws.cell(row=fila_actual, column=4).value = 37
         ws.cell(row=fila_actual, column=4).alignment = align_center
         
@@ -236,12 +287,9 @@ def generar_excel_pab(df_banco, corte_seleccionado):
         try: cuenta_val = int(cuenta_val)
         except: pass
         ws.cell(row=fila_actual, column=6).value = cuenta_val
-        
         ws.cell(row=fila_actual, column=11).value = float(row['VALOR_NETO_A_PAGAR'])
         ws.cell(row=fila_actual, column=11).number_format = '0'
-        
         ws.cell(row=fila_actual, column=12).value = int(fecha_app)
-        
         fila_actual += 1
         
     output = io.BytesIO()
@@ -254,17 +302,14 @@ def generar_excel_pab(df_banco, corte_seleccionado):
 def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
     pdf.add_page()
     pdf.set_text_color(0, 0, 0)
-    
     pdf.set_font("helvetica", "", 11)
     pdf.cell(0, 6, f"{datos['ciudad']} {datos['fecha_emision']}".upper(), 0, 1, 'R')
     pdf.ln(12)
-    
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 6, "SERGEM MENSAJERIA S.A.S.", 0, 1, 'C')
     pdf.set_font("helvetica", "", 11)
     pdf.cell(0, 6, "NIT: 900.561.833-1", 0, 1, 'C')
     pdf.ln(8)
-    
     pdf.cell(0, 6, "DEBE A:", 0, 1, 'C')
     pdf.set_font("helvetica", "B", 12)
     pdf.cell(0, 6, str(datos['nombre_prestador']).upper(), 0, 1, 'C')
@@ -384,7 +429,6 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
 
 def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.add_page()
-    
     try:
         if os.path.exists('sergemLogo.png'):
             pdf.image('sergemLogo.png', 10, 8, w=45)
@@ -466,7 +510,6 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.cell(0, 6, nombres_conds, 1, 1)
     pdf.ln(6)
 
-    # Detalle de Items
     pdf.set_fill_color(227, 0, 15)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font('helvetica', 'B', 9)
@@ -681,7 +724,7 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws.page_margins.left = 0.5; ws.page_margins.right = 0.5; ws.page_margins.top = 0.5; ws.page_margins.bottom = 0.5
 
 # ==============================================================================
-# PROCESO MATEMÁTICO PRINCIPAL (CON EXTRACCIÓN DINÁMICA DE TIPO DOCUMENTO)
+# PROCESO MATEMÁTICO PRINCIPAL
 # ==============================================================================
 def obtener_nombre_columna(df, opciones):
     for op in opciones:
@@ -788,7 +831,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
                             except: pass
 
         total_neto_esperado = ingreso_neto_esperado + fuera_perimetro_neto
-
         ingreso_bruto_total = round(total_neto_esperado / (1 - tasa_total_impuestos)) if total_neto_esperado > 0 else 0
         retefuente = round(ingreso_bruto_total * porcentaje_retefuente)
         ica = round(ingreso_bruto_total * porcentaje_ica)
@@ -856,7 +898,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
 # ==============================================================================
 def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte_seleccionado, total_nomina_bd):
     try:
-        # Filtrar el DataFrame según el periodo/corte seleccionado
         col_periodo = obtener_nombre_columna(df_cobro_raw, ['PERIODO', 'CORTE'])
         if col_periodo:
             df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_seleccionado).strip().upper()].copy()
@@ -893,7 +934,6 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
-        # CRUZAMOS CON LO QUE REALMENTE SE PAGÓ EN GOOGLE SHEETS
         df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='left')
         df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
         
@@ -1005,7 +1045,6 @@ df_pagos_completo = pd.DataFrame(data_cruda.get('pagos', []))
 df_bd_maestra = pd.DataFrame(data_cruda.get('bd', []))
 df_fuera = pd.DataFrame(data_cruda.get('fueras_perimetro', []))
 
-# Nuevas BD conectadas en vivo desde Apps Script (Reemplazo a archivos)
 df_rent_hist = pd.DataFrame(data_cruda.get('rent_hist', []))
 df_rent_pollos = pd.DataFrame(data_cruda.get('rent_pollos', []))
 df_rent_directo = pd.DataFrame(data_cruda.get('rent_directo', []))
@@ -1048,7 +1087,6 @@ st.divider()
 corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar / visualizar:", cortes_disponibles)
 df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado].copy()
 
-# --- PREPARACIÓN DE COLUMNAS CLAVE CON SANITIZACIÓN ROBUSTA ---
 df_pagos_corte['_ced_prestador_clean'] = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
 df_pagos_corte['_ced_banco_clean'] = df_pagos_corte[col_cedula_banco].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
 
@@ -1246,7 +1284,6 @@ with tab_generador:
                     wb_eq_ceros = openpyxl.Workbook(); wb_eq_ceros.remove(wb_eq_ceros.active)
                     
                     grupos = df_pagos_corte.groupby(['_ced_prestador_clean', '_ced_banco_clean'])
-                    
                     contador = 1
                     
                     for (ced_prestador, ced_banco), grupo_titular in grupos:
@@ -1389,14 +1426,8 @@ with tab_informes:
                 cc1, cc2 = st.columns([3, 2])
                 with cc1:
                     fig_cliente = px.bar(
-                        df_cli, 
-                        x='Valor Numérico', 
-                        y=col_cliente, 
-                        orientation='h',
-                        title="Distribución Total a Pagar por Cliente",
-                        text_auto='$.3s',
-                        color='Valor Numérico',
-                        color_continuous_scale='Reds'
+                        df_cli, x='Valor Numérico', y=col_cliente, orientation='h',
+                        title="Distribución Total a Pagar por Cliente", text_auto='$.3s', color='Valor Numérico', color_continuous_scale='Reds'
                     )
                     fig_cliente.update_layout(showlegend=False, xaxis_title="Total a Pagar ($)", yaxis_title="")
                     st.plotly_chart(fig_cliente, use_container_width=True)
@@ -1405,31 +1436,21 @@ with tab_informes:
                     st.markdown("**📋 Tabla Detallada Exacta**")
                     df_cli_table = df_cli.sort_values('Valor Numérico', ascending=False).rename(columns={col_cliente: "Cliente", "Valor Numérico": "Total a Pagar"})
                     df_cli_table["Total a Pagar"] = pd.to_numeric(df_cli_table["Total a Pagar"], errors='coerce').fillna(0)
-                    
-                    st.dataframe(
-                        df_cli_table.style.format({"Total a Pagar": "${:,.0f}"}),
-                        hide_index=True,
-                        use_container_width=True
-                    )
+                    st.dataframe(df_cli_table.style.format({"Total a Pagar": "${:,.0f}"}), hide_index=True, use_container_width=True)
         
         with t_ban:
             st.markdown("#### 🏦 Distribución de Fondos por Entidad Bancaria")
             col_banco_graf = obtener_nombre_columna(df_informe, ['BANCO', 'BANCO DESTINO'])
             if col_banco_graf:
                 df_ban = df_informe.groupby(col_banco_graf).agg(
-                    Cuentas=(col_banco_graf, 'count'),
-                    Total=('Valor Numérico', 'sum')
+                    Cuentas=(col_banco_graf, 'count'), Total=('Valor Numérico', 'sum')
                 ).reset_index().sort_values('Total', ascending=False)
                 
                 cb1, cb2 = st.columns([3, 2])
                 with cb1:
                     fig_banco = px.pie(
-                        df_ban, 
-                        names=col_banco_graf, 
-                        values='Total', 
-                        title="Porcentaje de Dinero Concentrado por Banco",
-                        hole=0.45,
-                        color_discrete_sequence=px.colors.sequential.Reds_r
+                        df_ban, names=col_banco_graf, values='Total', title="Porcentaje de Dinero Concentrado por Banco",
+                        hole=0.45, color_discrete_sequence=px.colors.sequential.Reds_r
                     )
                     fig_banco.update_traces(textposition='inside', textinfo='percent+label')
                     fig_banco.update_layout(showlegend=False)
@@ -1439,35 +1460,22 @@ with tab_informes:
                     st.markdown("**📋 Directorio de Transferencias Bancarias**")
                     df_ban_table = df_ban.rename(columns={col_banco_graf: "Entidad Bancaria", "Cuentas": "Cant. Transferencias", "Total": "Dinero a Girar"})
                     df_ban_table["Dinero a Girar"] = pd.to_numeric(df_ban_table["Dinero a Girar"], errors='coerce').fillna(0)
-                    
-                    st.dataframe(
-                        df_ban_table.style.format({"Dinero a Girar": "${:,.0f}"}),
-                        hide_index=True,
-                        use_container_width=True
-                    )
+                    st.dataframe(df_ban_table.style.format({"Dinero a Girar": "${:,.0f}"}), hide_index=True, use_container_width=True)
 
         with t_con:
             st.markdown("#### 🛵 Top 15 de Conductores con Mayor Volumen de Pago")
             col_cond = obtener_nombre_columna(df_informe, ['CONDUCTOR', 'NOMBRES'])
-            
             if col_cond:
                 agg_dict_cond = {'Valor Numérico': 'sum'}
                 if col_horas_inf: agg_dict_cond[col_horas_inf] = 'sum'
-                
                 df_cond = df_informe.groupby(col_cond).agg(agg_dict_cond).reset_index()
                 df_cond_top = df_cond.sort_values('Valor Numérico', ascending=False).head(15).sort_values('Valor Numérico', ascending=True)
                 
                 c_c1, c_c2 = st.columns([3, 2])
                 with c_c1:
                     fig_cond = px.bar(
-                        df_cond_top, 
-                        x='Valor Numérico', 
-                        y=col_cond, 
-                        orientation='h',
-                        title="Top 15 - Liquidación por Conductor",
-                        text_auto='$.3s',
-                        color='Valor Numérico',
-                        color_continuous_scale='Reds'
+                        df_cond_top, x='Valor Numérico', y=col_cond, orientation='h', title="Top 15 - Liquidación por Conductor",
+                        text_auto='$.3s', color='Valor Numérico', color_continuous_scale='Reds'
                     )
                     fig_cond.update_layout(showlegend=False, xaxis_title="Total a Pagar ($)", yaxis_title="")
                     st.plotly_chart(fig_cond, use_container_width=True)
@@ -1475,11 +1483,9 @@ with tab_informes:
                 with c_c2:
                     st.markdown(f"**📋 Directorio Completo (Todos los {len(df_cond)} Conductores)**")
                     df_cond_table = df_cond.sort_values('Valor Numérico', ascending=False)
-                    
                     rename_dict = {col_cond: "Conductor", "Valor Numérico": "Total a Pagar"}
                     if col_horas_inf: rename_dict[col_horas_inf] = "Horas Facturadas"
                     df_cond_table = df_cond_table.rename(columns=rename_dict)
-                    
                     df_cond_table["Total a Pagar"] = pd.to_numeric(df_cond_table["Total a Pagar"], errors='coerce').fillna(0)
                     
                     format_dict = {"Total a Pagar": "${:,.0f}"}
@@ -1487,21 +1493,15 @@ with tab_informes:
                         df_cond_table["Horas Facturadas"] = pd.to_numeric(df_cond_table["Horas Facturadas"], errors='coerce').fillna(0)
                         format_dict["Horas Facturadas"] = "{:,.1f}"
                     
-                    st.dataframe(
-                        df_cond_table.style.format(format_dict),
-                        hide_index=True,
-                        use_container_width=True,
-                        height=400 
-                    )
+                    st.dataframe(df_cond_table.style.format(format_dict), hide_index=True, use_container_width=True, height=400)
 
 # ==============================================================================
-# PESTAÑA 3: MÓDULO DE RENTABILIDAD OPERATIVA Y TRAZABILIDAD (REALIDAD EN VIVO)
+# PESTAÑA 3: MÓDULO DE RENTABILIDAD OPERATIVA (CARGA Y VISUALIZACIÓN EN VIVO)
 # ==============================================================================
 with tab_rentabilidad:
-    st.markdown("### 📈 Módulo de Rentabilidad Operativa (Conectado 100% en Vivo a Sheets)")
+    st.markdown("### 📈 Módulo de Rentabilidad Operativa (Conectado a Google Sheets)")
     
     if "df_pagos_reales" not in st.session_state or st.session_state.get('corte_procesado') != corte_seleccionado:
-        # Tomamos DIRECTAMENTE la información de pagos (BD Actualizada)
         col_total_pagar = obtener_nombre_columna(df_pagos_corte, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
         col_ced_conductor = obtener_nombre_columna(df_pagos_corte, ['CÉDULA', 'CEDULA', 'C.C.', 'CC'])
         col_nombre_conductor = obtener_nombre_columna(df_pagos_corte, ['CONDUCTOR', 'NOMBRES', 'NOMBRE'])
@@ -1520,41 +1520,99 @@ with tab_rentabilidad:
             st.session_state.df_pagos_reales = df_pagos_agrupados
             st.session_state.total_nomina_bd = df_pagos_agrupados['VALOR_PAGADO_NETO'].sum()
             st.session_state.corte_procesado = corte_seleccionado
-        else:
-            st.error("No se detectaron las columnas de CÉDULA o TOTAL A PAGAR en la hoja de pagos.")
 
     df_pagos_reales = st.session_state.df_pagos_reales
     total_nomina_bd = st.session_state.total_nomina_bd
 
-    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo (Cruce)"])
+    sub_ltsa, sub_pollos, sub_directo = st.tabs(["🚚 Rentabilidad LTSA", "🍗 Pollos y Panadería", "👷 Personal Directo"])
     
+    # ------------------ LTSA ------------------
     with sub_ltsa:
-        st.info(f"📊 Analizando la hoja **RENTABILIDAD_HISTORICA (LTSA)** para el corte: **{corte_seleccionado}**")
+        st.markdown("#### 📤 1. Cargar Validador a la Base de Datos")
+        c1, c2 = st.columns([1, 2])
+        per_ltsa = c1.text_input("Digita el PERIODO (Corte) a inyectar:", value=corte_seleccionado, key="per_ltsa")
+        file_ltsa = c2.file_uploader("Archivo Validador Excel (LTSA)", type=["xlsx", "xls"], key="up_ltsa")
+        
+        if file_ltsa and per_ltsa:
+            if st.button("🚀 Enviar a Google Sheets (LTSA)", use_container_width=True, type="primary"):
+                with st.spinner("Preparando archivo y subiendo a la nube..."):
+                    df_raw_ltsa = extraer_df_desde_excel(file_ltsa, 'REPORTE')
+                    cols_ltsa_gsheets = ['ORIGEN', 'PUNTO DE VENTA', 'OPERACIÓN', 'CÓDIGO', 'CIUDAD ORIGEN', 'CIUDAD DESTINO', 'CEDULA', 'NOMBRE', 'TIPO DE VEHICULO', 'PLACA', 'ESTADO', 'CONCEPTO TARIFA', 'TARIFA', 'Días/Horas', 'TOTAL', 'OBSERVACION OP', 'OBSERVACIONES ÉXITO', 'HORAS RVS', 'DIFERENCIA', 'TOTAL FACTURAR', 'OBSERVACIÓN', 'OPERADOR', 'PERIODO']
+                    
+                    bulk_data_ltsa = preparar_df_para_sheets(df_raw_ltsa, cols_ltsa_gsheets, per_ltsa)
+                    res_ltsa = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_HISTORICA", bulk_data_ltsa, clear_first=False)
+                    
+                    if res_ltsa.get('status') == 'success':
+                        st.success("✅ ¡Datos inyectados exitosamente! Haz clic en el botón gris de 'Sincronizar Base de Datos' en la parte superior para ver los resultados.")
+                    else:
+                        st.error(f"Error al subir: {res_ltsa.get('message')}")
+
+        st.divider()
+        st.markdown(f"#### 📊 2. Tablero de Resultados (Corte: {corte_seleccionado})")
         if not df_rent_hist.empty:
             procesar_rentabilidad_db(df_rent_hist, "LTSA", df_pagos_reales, corte_seleccionado, total_nomina_bd)
         else:
-            st.warning("⚠️ No se encontró información en la pestaña RENTABILIDAD_HISTORICA de tu Google Sheets.")
+            st.info("No hay datos en la base de datos para mostrar. Sube el validador en el paso 1.")
 
+    # ------------------ POLLOS ------------------
     with sub_pollos:
-        st.info(f"🍗 Analizando la hoja **RENTABILIDAD_POLLOS_PANADERIA** para el corte: **{corte_seleccionado}**")
+        st.markdown("#### 📤 1. Cargar Validador a la Base de Datos")
+        c3, c4 = st.columns([1, 2])
+        per_pollos = c3.text_input("Digita el PERIODO (Corte) a inyectar:", value=corte_seleccionado, key="per_pollos")
+        file_pollos = c4.file_uploader("Archivo Validador Excel (POLLOS)", type=["xlsx", "xls"], key="up_pollos")
+        
+        if file_pollos and per_pollos:
+            if st.button("🚀 Enviar a Google Sheets (POLLOS)", use_container_width=True, type="primary"):
+                with st.spinner("Preparando archivo y subiendo a la nube..."):
+                    df_raw_pollos = extraer_df_desde_excel(file_pollos, 'COBRO')
+                    cols_pollos_gsheets = ['ORIGEN', 'PUNTO DE VENTA', 'OPERACIÓN', 'CÓDIGO', 'CIUDAD ORIGEN', 'CIUDAD DESTINO', 'CEDULA', 'NOMBRE', 'TIPO DE VEHICULO', 'PLACA', 'ESTADO', 'CONCEPTO TARIFA', 'TARIFA', 'Días/Horas', 'TOTAL', 'OBSERVACION OP', 'OBSERVACIONES ÉXITO', 'HORAS RVS', 'DIFERENCIA', 'TOTAL FACTURAR', 'OBSERVACIÓN', 'OPERADOR', 'PERIODO']
+                    
+                    bulk_data_pollos = preparar_df_para_sheets(df_raw_pollos, cols_pollos_gsheets, per_pollos)
+                    res_pollos = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_POLLOS_PANADERIA", bulk_data_pollos, clear_first=False)
+                    
+                    if res_pollos.get('status') == 'success':
+                        st.success("✅ ¡Datos inyectados exitosamente! Haz clic en el botón gris de 'Sincronizar Base de Datos' en la parte superior para ver los resultados.")
+                    else:
+                        st.error(f"Error al subir: {res_pollos.get('message')}")
+
+        st.divider()
+        st.markdown(f"#### 📊 2. Tablero de Resultados (Corte: {corte_seleccionado})")
         if not df_rent_pollos.empty:
             procesar_rentabilidad_db(df_rent_pollos, "Pollos y Panadería", df_pagos_reales, corte_seleccionado, total_nomina_bd)
         else:
-            st.warning("⚠️ No se encontró información en la pestaña RENTABILIDAD_POLLOS_PANADERIA de tu Google Sheets.")
+            st.info("No hay datos en la base de datos para mostrar. Sube el validador en el paso 1.")
 
+    # ------------------ PERSONAL DIRECTO ------------------
     with sub_directo:
-        st.info("👷 Analizando y cruzando rentabilidad de **Personal Directo (De Planta)**.")
+        st.markdown("#### 📤 1. Cargar Lista de Personal Directo a la Base de Datos")
+        c5, c6 = st.columns([1, 2])
+        limpiar_directo = c5.checkbox("Reemplazar lista completa (Borrar anteriores)", value=False)
+        file_directo = c6.file_uploader("Archivo Excel (Personal Directo)", type=["xlsx", "xls"], key="up_directo")
+        
+        if file_directo:
+            if st.button("🚀 Enviar a Google Sheets (PERSONAL DIRECTO)", use_container_width=True, type="primary"):
+                with st.spinner("Preparando archivo y subiendo a la nube..."):
+                    df_raw_directo = extraer_df_desde_excel(file_directo)
+                    cols_directo_gsheets = ['NOMBRE COMPLETO', 'CÓDIGO INGRESO', 'IDENTIFICACIÓN', 'ACTIVO', 'FECHA DE INGRESO', 'NÓMINA', 'CENTRO DE COSTOS', 'NOMBRE CENTRO COSTO', 'FECHA DE RETIRO']
+                    
+                    bulk_data_directo = preparar_df_para_sheets(df_raw_directo, cols_directo_gsheets, periodo="")
+                    res_directo = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_PERSONAL_DIRECTO", bulk_data_directo, clear_first=limpiar_directo)
+                    
+                    if res_directo.get('status') == 'success':
+                        st.success("✅ ¡Lista inyectada exitosamente! Haz clic en el botón gris de 'Sincronizar Base de Datos' en la parte superior para actualizar.")
+                    else:
+                        st.error(f"Error al subir: {res_directo.get('message')}")
+
+        st.divider()
+        st.markdown(f"#### 📊 2. Tablero Operativo: Directos vs Terceros")
         if not df_rent_directo.empty:
             col_id = obtener_nombre_columna(df_rent_directo, ['IDENTIFICACIÓN', 'IDENTIFICACION', 'CÉDULA', 'CEDULA', 'CC', 'DOCUMENTO'])
             
             if col_id:
                 cedulas_planta = df_rent_directo[col_id].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip().tolist()
-                st.success(f"✅ Se detectaron **{len(cedulas_planta)}** empleados en la lista de Personal Directo de tu base de datos.")
+                st.success(f"✅ Hay **{len(cedulas_planta)}** empleados marcados como Personal Directo en la base de datos.")
                 
                 if 'df_raw_LTSA' in st.session_state:
-                    st.divider()
-                    st.markdown("### 🧠 Dashboard Estratégico Operativo: Directos vs Terceros (Basado en la Realidad)")
-                    
                     df_ltsa = st.session_state['df_raw_LTSA'].copy()
                     col_ced_ltsa = obtener_nombre_columna(df_ltsa, ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION'])
                     col_tot_ltsa = obtener_nombre_columna(df_ltsa, ['TOTAL FACTURAR', 'TOTAL', 'VALOR TOTAL'])
@@ -1562,10 +1620,9 @@ with tab_rentabilidad:
                     if col_ced_ltsa and col_tot_ltsa:
                         df_ltsa['_cedula_clean'] = df_ltsa[col_ced_ltsa].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
                         df_ltsa = df_ltsa[df_ltsa['_cedula_clean'] != '']
-                        
                         df_ltsa['TOTAL_COBRADO'] = pd.to_numeric(df_ltsa[col_tot_ltsa], errors='coerce').fillna(0)
-                        ltsa_grouped = df_ltsa.groupby('_cedula_clean')['TOTAL_COBRADO'].sum().reset_index()
                         
+                        ltsa_grouped = df_ltsa.groupby('_cedula_clean')['TOTAL_COBRADO'].sum().reset_index()
                         df_cruce_directo = pd.merge(ltsa_grouped, df_pagos_reales, on='_cedula_clean', how='outer').fillna(0)
                         
                         df_cruce_directo['Tipo_Contratacion'] = df_cruce_directo['_cedula_clean'].isin(cedulas_planta).map({True: 'Directo (Planta)', False: 'Tercero'})
@@ -1580,15 +1637,12 @@ with tab_rentabilidad:
                         c2.metric("Pagado Real Total (Sheets)", f"${t_cost:,.0f}")
                         c3.metric("Utilidad Real Total", f"${t_util:,.0f}")
                         
-                        st.markdown("#### 1. Análisis Comparativo: Utilidad Real Planta vs Terceros")
-                        
                         df_agrupado = df_cruce_directo.groupby('Tipo_Contratacion').agg({
                             'TOTAL_COBRADO': 'sum', 'VALOR_PAGADO_NETO': 'sum', 'UTILIDAD_REAL': 'sum'
                         }).reset_index()
                         df_agrupado['Margen_Real'] = (df_agrupado['UTILIDAD_REAL'] / df_agrupado['TOTAL_COBRADO'].replace(0, 1)).fillna(0)
                         
                         col_graf1, col_graf2 = st.columns(2)
-                        
                         with col_graf1:
                             fig1 = px.pie(df_agrupado, names='Tipo_Contratacion', values='UTILIDAD_REAL', title="Distribución de la Utilidad Real", hole=0.4, color='Tipo_Contratacion', color_discrete_map={'Directo (Planta)':'#15803d', 'Tercero':'#E3000F'})
                             st.plotly_chart(fig1, use_container_width=True)
@@ -1599,8 +1653,8 @@ with tab_rentabilidad:
                     else:
                         st.warning("⚠️ No se lograron cruzar los datos porque faltan las columnas de Cédula o Total Facturar en LTSA.")
                 else:
-                    st.info("💡 **Recordatorio:**\nPara ver este cruce, primero debes dar clic en la pestaña **🚚 Rentabilidad LTSA** para que el sistema procese la facturación de ese cliente, y luego volver aquí.")
+                    st.info("💡 **Recordatorio:** Para ver el cruce Directo vs Terceros de esta quincena, asegúrate de haber visto el reporte de LTSA para que el sistema procese primero la facturación.")
             else:
                 st.error("No se encontró la columna de IDENTIFICACIÓN o CÉDULA en la hoja de Personal Directo.")
         else:
-            st.warning("⚠️ No se encontró información en la pestaña RENTABILIDAD_PERSONAL_DIRECTO.")
+            st.info("No hay datos cargados de Personal Directo. Sube el archivo en el paso 1.")
