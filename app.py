@@ -121,10 +121,17 @@ def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False, replace_p
         "bulk_data": bulk_data
     }
     try:
-        response = requests.post(url, json=payload)
-        return response.json()
+        response = requests.post(url, json=payload, allow_redirects=True, timeout=30)
+        if response.status_code != 200:
+            return {"status": "error", "message": f"HTTP {response.status_code}: {response.text[:100]}"}
+        
+        try:
+            return response.json()
+        except ValueError:
+            return {"status": "error", "message": f"Respuesta no válida del servidor: {response.text[:100]}"}
+            
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": str(e) or "Error de conexión desconocido."}
 
 def extraer_df_desde_excel(archivo, sheet_buscada=None):
     xls = pd.ExcelFile(archivo)
@@ -155,6 +162,20 @@ def extraer_df_desde_excel(archivo, sheet_buscada=None):
 
     df = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
     df.columns = df.columns.astype(str).str.strip().str.upper()
+    
+    # --- LIMPIEZA INTELIGENTE: Cortar donde termina la base de datos ---
+    col_id = None
+    for col in df.columns:
+        if any(alias in col for alias in ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION', 'IDENTIFICACIÓN']):
+            col_id = col
+            break
+            
+    if col_id:
+        # Borra filas donde la cédula esté vacía, sea NaN o contenga la palabra "TOTAL"
+        df = df.dropna(subset=[col_id])
+        df = df[~df[col_id].astype(str).str.upper().str.contains('TOTAL')]
+        df = df[df[col_id].astype(str).str.strip() != '']
+        
     return df
 
 def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
@@ -183,7 +204,6 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
             else:
                 df_out[col] = ""
                 
-    # SOLUCIÓN DE NÚMEROS GIGANTES: Asegurar formato correcto por tipo de dato
     for col in df_out.columns:
         if pd.api.types.is_datetime64_any_dtype(df_out[col]):
             df_out[col] = df_out[col].dt.strftime('%Y-%m-%d')
@@ -192,7 +212,6 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
         elif col in ['TOTAL', 'TOTAL FACTURAR', 'TARIFA', 'NETO', 'VALOR TOTAL']:
             df_out[col] = pd.to_numeric(df_out[col], errors='coerce').fillna(0)
             
-    # BLINDAJE EXTREMO CONTRA NaNs (Soluciona el error "Out of range float values")
     raw_list = df_out.values.tolist()
     cleaned_list = []
     for row in raw_list:
@@ -1659,7 +1678,7 @@ with tab_rentabilidad:
                 if 'df_raw_LTSA' in st.session_state:
                     df_ltsa = st.session_state['df_raw_LTSA'].copy()
                     col_ced_ltsa = obtener_nombre_columna(df_ltsa, ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION'])
-                    col_tot_ltsa = obtener_nombre_columna(df_ltsa, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR'])
+                    col_tot_ltsa = obtener_nombre_columna(df_ltsa, ['TOTAL FACTURAR', 'TOTAL', 'VALOR TOTAL'])
                     
                     if col_ced_ltsa and col_tot_ltsa:
                         df_ltsa['_cedula_clean'] = df_ltsa[col_ced_ltsa].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
