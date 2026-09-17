@@ -83,7 +83,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-GAS_URL = "https://script.google.com/macros/s/AKfycbyqJtrmVdNT1rxTobg6q_WoJCwMpp40hdIzJeEm4dKNLBgDVxwEY95T0EIoBu_qo8FB/exec"
+GAS_URL = "https://script.google.com/macros/s/AKfycbzUT0gAjxyq4bCDGo06siBJya4C9OHDRwAEL_igBG_gJK19DIJCIkgmCYH819BTym1u/exec"
 
 # ==============================================================================
 # DICCIONARIO DE BANCOS 
