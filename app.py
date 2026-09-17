@@ -3,6 +3,7 @@ import io
 import zipfile
 import os
 import re
+import math
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from fpdf import FPDF
@@ -120,18 +121,10 @@ def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False, replace_p
         "bulk_data": bulk_data
     }
     try:
-        # allow_redirects=True es obligatorio para evitar errores "silenciosos" con Google Scripts
-        response = requests.post(url, json=payload, allow_redirects=True, timeout=30)
-        if response.status_code != 200:
-            return {"status": "error", "message": f"HTTP {response.status_code}: {response.text[:100]}"}
-        
-        try:
-            return response.json()
-        except ValueError:
-            return {"status": "error", "message": f"Respuesta no válida del servidor: {response.text[:100]}"}
-            
+        response = requests.post(url, json=payload)
+        return response.json()
     except Exception as e:
-        return {"status": "error", "message": str(e) or "Error de conexión desconocido."}
+        return {"status": "error", "message": str(e)}
 
 def extraer_df_desde_excel(archivo, sheet_buscada=None):
     xls = pd.ExcelFile(archivo)
@@ -166,21 +159,23 @@ def extraer_df_desde_excel(archivo, sheet_buscada=None):
 
 def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
     df_out = pd.DataFrame(columns=cols_esperadas)
+    
     for col in cols_esperadas:
         if col == 'PERIODO' and periodo:
             df_out[col] = periodo
         else:
-            alias = [col]
-            if col == 'CEDULA' or col == 'IDENTIFICACIÓN': 
-                alias.extend(['CÉDULA', 'C.C.', 'IDENTIFICACION', 'DOCUMENTO', 'CC'])
+            if col == 'TOTAL FACTURAR':
+                alias = ['TOTAL', 'TOTAL FACTURAR', 'VALOR TOTAL', 'NETO', 'VALOR_TOTAL']
+            elif col == 'CEDULA' or col == 'IDENTIFICACIÓN': 
+                alias = [col, 'CÉDULA', 'C.C.', 'IDENTIFICACION', 'DOCUMENTO', 'CC']
             elif col == 'NOMBRE' or col == 'NOMBRE COMPLETO': 
-                alias.extend(['NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO'])
-            elif col == 'TOTAL FACTURAR': 
-                alias.extend(['TOTAL', 'VALOR TOTAL', 'NETO', 'VALOR_TOTAL'])
+                alias = [col, 'NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO']
             elif col == 'TIPO DE VEHICULO': 
-                alias.extend(['VEHICULO', 'CATEGORIA'])
+                alias = [col, 'VEHICULO', 'CATEGORIA']
             elif col == 'PUNTO DE VENTA': 
-                alias.extend(['ALMACEN', 'CLIENTE', 'PUNTO_VENTA'])
+                alias = [col, 'ALMACEN', 'CLIENTE', 'PUNTO_VENTA']
+            else:
+                alias = [col]
             
             col_found = obtener_nombre_columna(df_raw, alias)
             if col_found:
@@ -188,19 +183,30 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
             else:
                 df_out[col] = ""
                 
-    # Blindaje contra errores de formato (Fechas, NaNs ocultos, objetos Timestamp)
+    # SOLUCIÓN DE NÚMEROS GIGANTES: Asegurar formato correcto por tipo de dato
     for col in df_out.columns:
-        if col in ['TOTAL', 'TOTAL FACTURAR', 'TARIFA', 'NETO', 'VALOR TOTAL']:
+        if pd.api.types.is_datetime64_any_dtype(df_out[col]):
+            df_out[col] = df_out[col].dt.strftime('%Y-%m-%d')
+        elif col in ['CEDULA', 'IDENTIFICACIÓN', 'CÓDIGO INGRESO']:
+            df_out[col] = df_out[col].astype(str).replace(r'\.0$', '', regex=True).replace(['nan', 'NaT', 'None'], '').str.strip()
+        elif col in ['TOTAL', 'TOTAL FACTURAR', 'TARIFA', 'NETO', 'VALOR TOTAL']:
             df_out[col] = pd.to_numeric(df_out[col], errors='coerce').fillna(0)
-        else:
-            if pd.api.types.is_datetime64_any_dtype(df_out[col]):
-                df_out[col] = df_out[col].dt.strftime('%Y-%m-%d')
-                
-            # Forzamos conversión a STRING absoluto para evitar crasheos de JSON
-            df_out[col] = df_out[col].astype(str).replace(r'\.0$', '', regex=True)
-            df_out[col] = df_out[col].replace(['nan', 'NaN', 'NaT', '<NA>', 'None'], "")
             
-    return df_out.values.tolist()
+    # BLINDAJE EXTREMO CONTRA NaNs (Soluciona el error "Out of range float values")
+    raw_list = df_out.values.tolist()
+    cleaned_list = []
+    for row in raw_list:
+        cleaned_row = []
+        for val in row:
+            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                cleaned_row.append("")
+            elif pd.isna(val):
+                cleaned_row.append("")
+            else:
+                cleaned_row.append(val)
+        cleaned_list.append(cleaned_row)
+            
+    return cleaned_list
 
 def limpiar_dinero(val):
     if pd.isna(val) or val == "": return 0.0
@@ -772,7 +778,7 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
         tipo_doc_raw = str(row_titular.get('TIPO DOCUMENTO', 'CC')).upper().strip()
         
     if 'NIT' in tipo_doc_raw: tipo_doc_pab = 'NIT'
-    elif 'CE' in tipo_doc_raw or 'EXTRANJ' in tipo_doc_raw: tipo_doc_pab = 'CE'
+    elif 'CE' in tipo_doc_raw or 'EXTRANJ' in tipo_doc_pab: tipo_doc_pab = 'CE'
     elif 'PASAPORTE' in tipo_doc_raw or 'PP' in tipo_doc_pab: tipo_doc_pab = 'PP'
     else: tipo_doc_pab = 'CC'
     
