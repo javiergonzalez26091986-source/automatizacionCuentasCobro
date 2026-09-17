@@ -143,7 +143,7 @@ def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False, replace_p
 def extraer_df_desde_excel(archivo, sheet_buscada=None):
     xls = pd.ExcelFile(archivo)
     hoja_objetivo = None
-    posibles = [sheet_buscada, 'REPORTE', 'COBRO', 'PAGO', 'BASE', 'DATOS'] if sheet_buscada else ['REPORTE', 'COBRO', 'PAGO', 'BASE', 'DATOS']
+    posibles = [sheet_buscada, 'REPORTE', 'COBRO', 'BASE', 'DATOS'] if sheet_buscada else ['REPORTE', 'COBRO', 'BASE', 'DATOS']
     
     for nombre in posibles:
         if nombre and nombre in xls.sheet_names:
@@ -163,14 +163,13 @@ def extraer_df_desde_excel(archivo, sheet_buscada=None):
     fila_header = 0
     for idx, fila in df_temp.iterrows():
         textos = fila.astype(str).str.upper().tolist()
-        if any(col in textos for col in ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION', 'IDENTIFICACIÓN', 'NOMBRE COMPLETO', 'EMPLEADO']):
+        if any(col in textos for col in ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION', 'IDENTIFICACIÓN', 'NOMBRE COMPLETO']):
             fila_header = idx
             break
 
     df = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
     df.columns = df.columns.astype(str).str.strip().str.upper()
     
-    # --- LIMPIEZA INTELIGENTE ---
     col_id = None
     for col in df.columns:
         if any(alias in col for alias in ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION', 'IDENTIFICACIÓN']):
@@ -215,7 +214,7 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
             df_out[col] = df_out[col].dt.strftime('%Y-%m-%d')
         elif col in ['CEDULA', 'IDENTIFICACIÓN', 'CÓDIGO INGRESO']:
             df_out[col] = df_out[col].astype(str).replace(r'\.0$', '', regex=True).replace(['nan', 'NaT', 'None'], '').str.strip()
-        elif col in ['TOTAL', 'TOTAL FACTURAR', 'TARIFA', 'NETO', 'VALOR TOTAL', 'VALOR PAGO']:
+        elif col in ['TOTAL', 'TOTAL FACTURAR', 'TARIFA', 'NETO', 'VALOR TOTAL']:
             df_out[col] = pd.to_numeric(df_out[col], errors='coerce').fillna(0)
             
     raw_list = df_out.values.tolist()
@@ -954,14 +953,14 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, 
             df_cobro = df_cobro_raw.copy()
 
         if df_cobro.empty:
+            # st.warning ya se encarga el bloque anterior, aquí retornamos silenciosamente
             return
 
         if titulo_modulo == "LTSA":
             st.session_state['df_raw_LTSA'] = df_cobro.copy()
             
         col_ced_cobro = obtener_nombre_columna(df_cobro, ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN'])
-        # AHORA BUSCAMOS 'VALOR PAGO' PRIMERO SI ES POLLOS, O 'TOTAL' PARA LTSA
-        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'VALOR PAGO', 'TOTAL FACTURAR', 'NETO'])
+        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR', 'NETO'])
         col_vehiculo = obtener_nombre_columna(df_cobro, ['TIPO DE VEHICULO', 'VEHICULO', 'CATEGORIA'])
         col_almacen = obtener_nombre_columna(df_cobro, ['PUNTO DE VENTA', 'ALMACEN', 'CLIENTE'])
         col_nombre_cobro = obtener_nombre_columna(df_cobro, ['NOMBRE', 'NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO']) 
@@ -984,31 +983,10 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, 
         cobro_agrupado = df_cobro.groupby('_cedula_clean').agg(agg_dict).reset_index()
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
-        # SI ES POLLOS Y VIENE DE LA PESTAÑA PAGO, ES UN COSTO DE NÓMINA PROPIO
-        if titulo_modulo == "Pollos y Panadería" and 'VALOR PAGO' in df_cobro.columns:
-            # En Pollos, la pestaña PAGO nos da los costos de nómina propios de Pollos
-            df_cruce = cobro_agrupado.copy()
-            df_cruce.rename(columns={'TOTAL_COBRADO_LTSA': 'VALOR_PAGADO_NETO'}, inplace=True)
-            
-            # Traemos lo cobrado desde la pestaña REPORTE de Pollos si existe
-            if 'df_pollos_reporte' in st.session_state:
-                df_rep_p = st.session_state['df_pollos_reporte']
-                col_c_p = obtener_nombre_columna(df_rep_p, ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION'])
-                col_v_p = obtener_nombre_columna(df_rep_p, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR'])
-                if col_c_p and col_v_p:
-                    df_rep_p['_cedula_clean'] = df_rep_p[col_c_p].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
-                    rep_agrupado = df_rep_p.groupby('_cedula_clean')[col_v_p].sum().reset_index()
-                    rep_agrupado.rename(columns={col_v_p: 'TOTAL_COBRADO_LTSA'}, inplace=True)
-                    df_cruce = pd.merge(df_cruce, rep_agrupado, on='_cedula_clean', how='outer').fillna(0)
-                else:
-                    df_cruce['TOTAL_COBRADO_LTSA'] = 0
-            else:
-                df_cruce['TOTAL_COBRADO_LTSA'] = 0
-        else:
-            # LTSA cruza contra Pagos Generales (PAGOS PERSONAL POR SERVICIOS)
-            df_cruce = pd.merge(cobro_agrupado, df_pagos_reales_rent, on='_cedula_clean', how='outer')
-            df_cruce['TOTAL_COBRADO_LTSA'] = df_cruce['TOTAL_COBRADO_LTSA'].fillna(0)
-            df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
+        # OUTER JOIN: Cruce bidireccional absoluto
+        df_cruce = pd.merge(cobro_agrupado, df_pagos_reales_rent, on='_cedula_clean', how='outer')
+        df_cruce['TOTAL_COBRADO_LTSA'] = df_cruce['TOTAL_COBRADO_LTSA'].fillna(0)
+        df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
         
         if col_nombre_cobro in df_cruce.columns and 'NOMBRE_EMPLEADO' in df_cruce.columns:
             df_cruce['NOMBRE_EMPLEADO'] = df_cruce['NOMBRE_EMPLEADO'].fillna(df_cruce[col_nombre_cobro])
@@ -1030,7 +1008,7 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, 
         else:
             df_cruce['CATEGORIA_VEHICULO'] = "NO DEFINIDO"
         
-        st.success(f"✅ Mostrando los **{len(df_cruce)}** registros de rentabilidad reales.")
+        st.success(f"✅ Mostrando los **{len(df_cruce)}** registros de rentabilidad reales cruzados con Pagos.")
         
         tab_emp, tab_veh, tab_alm = st.tabs(["👥 Rentabilidad por Empleado", "🛵 Rentabilidad por Vehículo", "🏢 Rentabilidad por Almacén"])
         
@@ -1150,12 +1128,14 @@ if not col_prestador or not col_titular_banco:
     st.error("Faltan las columnas que diferencian a quien cobra del titular del banco. Verifique sus nombres en el Sheets.")
     st.stop()
 
+# LA LISTA GENERAL SUPERIOR VUELVE A SER NORMAL (Solo periodos de pagos)
 cortes_disponibles = [c for c in df_pagos_completo['CORTE'].unique() if str(c).strip() != "" and str(c).lower() != "nan"]
 
 st.divider()
 
 corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar / visualizar:", cortes_disponibles)
 
+# El df general para el resto del programa
 df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado].copy()
 
 df_pagos_corte['_ced_prestador_clean'] = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
@@ -1359,7 +1339,7 @@ with tab_generador:
                     for (ced_prestador, ced_banco), grupo_titular in grupos:
                         if ced_prestador in ['nan', '', 'None']: continue
                         
-                        calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco, col_estado, col_anticipos, col_otros_desc, col_valor_dia)
+                        calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_ced_prestador, col_titular_banco, col_ced_banco, col_estado, col_anticipos, col_otros_desc, col_valor_dia)
                         
                         if not calculos: continue
                         
@@ -1570,18 +1550,19 @@ with tab_informes:
 # ==============================================================================
 with tab_rentabilidad:
     
-    # 1. Leer los periodos EXISTENTES EXCLUSIVAMENTE de Rentabilidad LTSA y Pollos
+    # 1. Creamos una lista inteligente combinada SÓLO de los periodos que están en Rentabilidad
     periodos_ltsa = df_rent_hist['PERIODO'].dropna().astype(str).str.strip().str.upper().tolist() if not df_rent_hist.empty and 'PERIODO' in df_rent_hist.columns else []
     periodos_pollos = df_rent_pollos['PERIODO'].dropna().astype(str).str.strip().str.upper().tolist() if not df_rent_pollos.empty and 'PERIODO' in df_rent_pollos.columns else []
     
-    todos_periodos_rent = list(set(periodos_ltsa + periodos_pollos))
-    todos_periodos_rent = [p for p in todos_periodos_rent if p not in ["", "NAN", "NONE"]]
-    todos_periodos_rent.sort(reverse=True)
+    todos_periodos = list(set(periodos_ltsa + periodos_pollos))
+    todos_periodos = [p for p in todos_periodos if p not in ["", "NAN", "NONE"]]
+    todos_periodos.sort(reverse=True)
     
-    opciones_rentabilidad = ["🌐 TODOS LOS CORTES (GLOBAL)"] + todos_periodos_rent
+    opciones_rentabilidad = ["🌐 TODOS LOS CORTES (GLOBAL)"] + todos_periodos
     
     st.markdown("<div class='caja-destacada'>", unsafe_allow_html=True)
-    corte_a_evaluar = st.selectbox("📌 **SELECCIONA EL CORTE A ANALIZAR EN RENTABILIDAD:**", opciones_rentabilidad, help="Selecciona el periodo que deseas consultar en los gráficos inferiores. 'GLOBAL' consolidará todos los cortes cargados.")
+    st.markdown("### 📈 Análisis de Rentabilidad")
+    corte_a_evaluar = st.selectbox("👇 Selecciona el corte que deseas consultar (Los datos se leen directamente desde Google Sheets):", opciones_rentabilidad)
     st.markdown("</div>", unsafe_allow_html=True)
     
     if corte_a_evaluar == "🌐 TODOS LOS CORTES (GLOBAL)":
@@ -1589,9 +1570,13 @@ with tab_rentabilidad:
         df_pagos_base = df_pagos_completo.copy()
     else:
         corte_evaluado_str = corte_a_evaluar
+        # OJO: Filtramos la base de PAGOS según el nombre seleccionado en la lista desplegable
         df_pagos_base = df_pagos_completo[df_pagos_completo['CORTE'] == corte_a_evaluar].copy()
+        
+        if df_pagos_base.empty:
+            st.error(f"⚠️ **Aviso Importante:** En la pestaña principal de 'Pagos Personal' no existe ningún corte llamado exactamente '{corte_a_evaluar}'. Por esta razón, el sistema asumirá que el Costo de Nómina es $0. Si deseas ver los costos, asegúrate de inyectar los datos usando el mismo nombre oficial del corte de nómina.")
 
-    # Recalculamos los PAGOS REALES
+    # Recalculamos los PAGOS REALES dependiendo de la selección
     col_total_pagar = obtener_nombre_columna(df_pagos_base, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
     col_ced_conductor = obtener_nombre_columna(df_pagos_base, ['CÉDULA', 'CEDULA', 'C.C.', 'CC'])
     col_nombre_conductor = obtener_nombre_columna(df_pagos_base, ['CONDUCTOR', 'NOMBRES', 'NOMBRE'])
@@ -1617,7 +1602,7 @@ with tab_rentabilidad:
     with sub_ltsa:
         st.markdown("#### 📤 1. Cargar Validador a la Base de Datos")
         c1, c2 = st.columns([1, 2])
-        per_ltsa = c1.text_input("Digita el PERIODO a inyectar:", value=corte_seleccionado, key="per_ltsa", help="Sugerimos dejar este nombre para que coincida exactamente con la hoja de Pagos.")
+        per_ltsa = c1.text_input("Digita el PERIODO a inyectar:", value=corte_seleccionado, key="per_ltsa", help="Sugerimos dejar este nombre, ya que es el nombre oficial del corte seleccionado en la parte superior.")
         file_ltsa = c2.file_uploader("Archivo Validador Excel (LTSA)", type=["xlsx", "xls"], key="up_ltsa")
         
         if file_ltsa and per_ltsa:
@@ -1662,7 +1647,7 @@ with tab_rentabilidad:
     with sub_pollos:
         st.markdown("#### 📤 1. Cargar Validador a la Base de Datos")
         c3, c4 = st.columns([1, 2])
-        per_pollos = c3.text_input("Digita el PERIODO a inyectar:", value=corte_seleccionado, key="per_pollos", help="Sugerimos dejar este nombre para que coincida exactamente con la hoja de Pagos.")
+        per_pollos = c3.text_input("Digita el PERIODO a inyectar:", value=corte_seleccionado, key="per_pollos", help="Sugerimos dejar este nombre, ya que es el nombre oficial del corte seleccionado en la parte superior.")
         file_pollos = c4.file_uploader("Archivo Validador Excel (POLLOS)", type=["xlsx", "xls"], key="up_pollos")
         
         if file_pollos and per_pollos:
