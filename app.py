@@ -920,7 +920,8 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte
             st.session_state['df_raw_LTSA'] = df_cobro.copy()
             
         col_ced_cobro = obtener_nombre_columna(df_cobro, ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN'])
-        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL FACTURAR', 'TOTAL', 'VALOR TOTAL', 'NETO'])
+        # SOLUCIÓN DE CEROS: Ahora el programa busca 'TOTAL' primero que 'TOTAL FACTURAR'
+        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR', 'NETO'])
         col_vehiculo = obtener_nombre_columna(df_cobro, ['TIPO DE VEHICULO', 'VEHICULO', 'CATEGORIA'])
         col_almacen = obtener_nombre_columna(df_cobro, ['PUNTO DE VENTA', 'ALMACEN', 'CLIENTE'])
         col_nombre_cobro = obtener_nombre_columna(df_cobro, ['NOMBRE', 'NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO']) 
@@ -1644,7 +1645,8 @@ with tab_rentabilidad:
                 if 'df_raw_LTSA' in st.session_state:
                     df_ltsa = st.session_state['df_raw_LTSA'].copy()
                     col_ced_ltsa = obtener_nombre_columna(df_ltsa, ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION'])
-                    col_tot_ltsa = obtener_nombre_columna(df_ltsa, ['TOTAL FACTURAR', 'TOTAL', 'VALOR TOTAL'])
+                    # SOLUCIÓN DE CEROS APLICADA AQUÍ TAMBIÉN:
+                    col_tot_ltsa = obtener_nombre_columna(df_ltsa, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR'])
                     
                     if col_ced_ltsa and col_tot_ltsa:
                         df_ltsa['_cedula_clean'] = df_ltsa[col_ced_ltsa].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
