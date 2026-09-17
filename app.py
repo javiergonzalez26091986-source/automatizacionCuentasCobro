@@ -81,6 +81,13 @@ st.markdown("""
     .metric-box {
         background-color: #f1f5f9; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #e2e8f0;
     }
+    .caja-destacada {
+        background-color: #e2e8f0; 
+        padding: 20px; 
+        border-radius: 10px; 
+        border: 2px solid #94a3b8;
+        margin-bottom: 20px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -938,18 +945,15 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, 
     try:
         col_periodo = obtener_nombre_columna(df_cobro_raw, ['PERIODO', 'CORTE'])
         
-        # Filtro global vs por corte
         if corte_a_evaluar == "GLOBAL":
             df_cobro = df_cobro_raw.copy()
-            st.info(f"Mostrando histórico global de rentabilidad acumulada para {titulo_modulo}.")
         elif col_periodo:
             df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_a_evaluar).strip().upper()].copy()
         else:
             df_cobro = df_cobro_raw.copy()
-            st.warning(f"No se detectó columna de PERIODO en la tabla de {titulo_modulo}. Se evaluará toda la tabla.")
 
         if df_cobro.empty:
-            st.warning(f"No hay registros en la base de datos de {titulo_modulo} para el periodo '{corte_a_evaluar}'.")
+            # st.warning ya se encarga el bloque anterior, aquí retornamos silenciosamente
             return
 
         if titulo_modulo == "LTSA":
@@ -1004,7 +1008,7 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, 
         else:
             df_cruce['CATEGORIA_VEHICULO'] = "NO DEFINIDO"
         
-        st.success(f"✅ Mostrando los **{len(df_cruce)}** registros de rentabilidad reales.")
+        st.success(f"✅ Mostrando los **{len(df_cruce)}** registros de rentabilidad reales cruzados con Pagos.")
         
         tab_emp, tab_veh, tab_alm = st.tabs(["👥 Rentabilidad por Empleado", "🛵 Rentabilidad por Vehículo", "🏢 Rentabilidad por Almacén"])
         
@@ -1124,7 +1128,7 @@ if not col_prestador or not col_titular_banco:
     st.error("Faltan las columnas que diferencian a quien cobra del titular del banco. Verifique sus nombres en el Sheets.")
     st.stop()
 
-# LA LISTA GENERAL SUPERIOR VUELVE A SER NORMAL (Solo periodos)
+# LA LISTA GENERAL SUPERIOR VUELVE A SER NORMAL (Solo periodos de pagos)
 cortes_disponibles = [c for c in df_pagos_completo['CORTE'].unique() if str(c).strip() != "" and str(c).lower() != "nan"]
 
 st.divider()
@@ -1545,36 +1549,39 @@ with tab_informes:
 # PESTAÑA 3: MÓDULO DE RENTABILIDAD OPERATIVA (CARGA Y VISUALIZACIÓN EN VIVO)
 # ==============================================================================
 with tab_rentabilidad:
-    st.markdown("### 📈 Módulo de Rentabilidad Operativa")
     
-    # 1. Crear una lista de todos los periodos posibles que existan en Pagos, LTSA y Pollos
-    periodos_pagos = df_pagos_completo['CORTE'].dropna().astype(str).str.strip().str.upper().tolist()
+    # 1. Creamos una lista inteligente combinada SÓLO de los periodos que están en Rentabilidad
     periodos_ltsa = df_rent_hist['PERIODO'].dropna().astype(str).str.strip().str.upper().tolist() if not df_rent_hist.empty and 'PERIODO' in df_rent_hist.columns else []
     periodos_pollos = df_rent_pollos['PERIODO'].dropna().astype(str).str.strip().str.upper().tolist() if not df_rent_pollos.empty and 'PERIODO' in df_rent_pollos.columns else []
     
-    todos_periodos = list(set(periodos_pagos + periodos_ltsa + periodos_pollos))
+    todos_periodos = list(set(periodos_ltsa + periodos_pollos))
     todos_periodos = [p for p in todos_periodos if p not in ["", "NAN", "NONE"]]
-    todos_periodos.sort()
+    todos_periodos.sort(reverse=True)
     
-    # 2. Agregar la opción Global al inicio
     opciones_rentabilidad = ["🌐 TODOS LOS CORTES (GLOBAL)"] + todos_periodos
     
-    # 3. Mostrar la lista desplegable INDEPENDIENTE solo para rentabilidad
-    corte_a_evaluar = st.selectbox("👀 Selecciona el corte a analizar en Rentabilidad:", opciones_rentabilidad)
+    st.markdown("<div class='caja-destacada'>", unsafe_allow_html=True)
+    st.markdown("### 📈 Análisis de Rentabilidad")
+    corte_a_evaluar = st.selectbox("👇 Selecciona el corte que deseas consultar (Los datos se leen directamente desde Google Sheets):", opciones_rentabilidad)
+    st.markdown("</div>", unsafe_allow_html=True)
     
     if corte_a_evaluar == "🌐 TODOS LOS CORTES (GLOBAL)":
         corte_evaluado_str = "GLOBAL"
         df_pagos_base = df_pagos_completo.copy()
     else:
         corte_evaluado_str = corte_a_evaluar
+        # OJO: Filtramos la base de PAGOS según el nombre seleccionado en la lista desplegable
         df_pagos_base = df_pagos_completo[df_pagos_completo['CORTE'] == corte_a_evaluar].copy()
+        
+        if df_pagos_base.empty:
+            st.error(f"⚠️ **Aviso Importante:** En la pestaña principal de 'Pagos Personal' no existe ningún corte llamado exactamente '{corte_a_evaluar}'. Por esta razón, el sistema asumirá que el Costo de Nómina es $0. Si deseas ver los costos, asegúrate de inyectar los datos usando el mismo nombre oficial del corte de nómina.")
 
-    # Recalculamos los PAGOS REALES dependiendo de la selección de este menú
+    # Recalculamos los PAGOS REALES dependiendo de la selección
     col_total_pagar = obtener_nombre_columna(df_pagos_base, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
     col_ced_conductor = obtener_nombre_columna(df_pagos_base, ['CÉDULA', 'CEDULA', 'C.C.', 'CC'])
     col_nombre_conductor = obtener_nombre_columna(df_pagos_base, ['CONDUCTOR', 'NOMBRES', 'NOMBRE'])
     
-    if col_total_pagar and col_ced_conductor:
+    if col_total_pagar and col_ced_conductor and not df_pagos_base.empty:
         df_pagos_base['_valor_pagar_num'] = df_pagos_base[col_total_pagar].apply(limpiar_dinero)
         df_pagos_base['_cedula_clean'] = df_pagos_base[col_ced_conductor].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         
@@ -1595,20 +1602,18 @@ with tab_rentabilidad:
     with sub_ltsa:
         st.markdown("#### 📤 1. Cargar Validador a la Base de Datos")
         c1, c2 = st.columns([1, 2])
-        # Solo pre-llenamos si no está en GLOBAL
-        per_ltsa = c1.text_input("Digita el PERIODO (Corte) a inyectar:", value=corte_a_evaluar if corte_a_evaluar != "🌐 TODOS LOS CORTES (GLOBAL)" else "", key="per_ltsa")
+        per_ltsa = c1.text_input("Digita el PERIODO a inyectar:", value=corte_seleccionado, key="per_ltsa", help="Sugerimos dejar este nombre, ya que es el nombre oficial del corte seleccionado en la parte superior.")
         file_ltsa = c2.file_uploader("Archivo Validador Excel (LTSA)", type=["xlsx", "xls"], key="up_ltsa")
         
         if file_ltsa and per_ltsa:
             per_ltsa_clean = per_ltsa.strip().upper()
-            periodos_existentes = df_rent_hist['PERIODO'].astype(str).str.strip().str.upper().tolist() if not df_rent_hist.empty and 'PERIODO' in df_rent_hist.columns else []
-            
             reemplazar_ltsa = False
-            if per_ltsa_clean in periodos_existentes:
+            
+            if per_ltsa_clean in periodos_ltsa:
                 st.warning(f"⚠️ ¡Atención! Ya existen datos registrados para el corte **{per_ltsa_clean}**.")
                 reemplazar_ltsa = st.checkbox(f"Sobrescribir datos (Se borrarán los registros anteriores de {per_ltsa_clean} para evitar duplicados)", value=True)
             
-            btn_disabled = (per_ltsa_clean in periodos_existentes) and not reemplazar_ltsa
+            btn_disabled = (per_ltsa_clean in periodos_ltsa) and not reemplazar_ltsa
             
             if st.button("🚀 Enviar a Google Sheets (LTSA)", use_container_width=True, type="primary", disabled=btn_disabled):
                 with st.spinner("Preparando archivo y subiendo a la nube (Puede tardar hasta 1 minuto)..."):
@@ -1642,19 +1647,18 @@ with tab_rentabilidad:
     with sub_pollos:
         st.markdown("#### 📤 1. Cargar Validador a la Base de Datos")
         c3, c4 = st.columns([1, 2])
-        per_pollos = c3.text_input("Digita el PERIODO (Corte) a inyectar:", value=corte_a_evaluar if corte_a_evaluar != "🌐 TODOS LOS CORTES (GLOBAL)" else "", key="per_pollos")
+        per_pollos = c3.text_input("Digita el PERIODO a inyectar:", value=corte_seleccionado, key="per_pollos", help="Sugerimos dejar este nombre, ya que es el nombre oficial del corte seleccionado en la parte superior.")
         file_pollos = c4.file_uploader("Archivo Validador Excel (POLLOS)", type=["xlsx", "xls"], key="up_pollos")
         
         if file_pollos and per_pollos:
             per_pollos_clean = per_pollos.strip().upper()
-            periodos_existentes_p = df_rent_pollos['PERIODO'].astype(str).str.strip().str.upper().tolist() if not df_rent_pollos.empty and 'PERIODO' in df_rent_pollos.columns else []
-            
             reemplazar_pollos = False
-            if per_pollos_clean in periodos_existentes_p:
+            
+            if per_pollos_clean in periodos_pollos:
                 st.warning(f"⚠️ ¡Atención! Ya existen datos registrados para el corte **{per_pollos_clean}**.")
                 reemplazar_pollos = st.checkbox(f"Sobrescribir datos (Se borrarán los registros anteriores de {per_pollos_clean} para evitar duplicados)", value=True, key="chk_pollos")
             
-            btn_disabled_p = (per_pollos_clean in periodos_existentes_p) and not reemplazar_pollos
+            btn_disabled_p = (per_pollos_clean in periodos_pollos) and not reemplazar_pollos
 
             if st.button("🚀 Enviar a Google Sheets (POLLOS)", use_container_width=True, type="primary", disabled=btn_disabled_p):
                 with st.spinner("Preparando archivo y subiendo a la nube (Puede tardar hasta 1 minuto)..."):
