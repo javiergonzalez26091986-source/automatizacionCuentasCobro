@@ -112,10 +112,11 @@ def cargar_datos(url):
         st.error(f"⚠️ Error en la conexión HTTP: {e}")
         return None
 
-def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False):
+def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False, replace_period=None):
     payload = {
         "sheet_name": sheet_name,
         "clear_first": clear_first,
+        "replace_period": replace_period,
         "bulk_data": bulk_data
     }
     try:
@@ -1540,13 +1541,24 @@ with tab_rentabilidad:
         file_ltsa = c2.file_uploader("Archivo Validador Excel (LTSA)", type=["xlsx", "xls"], key="up_ltsa")
         
         if file_ltsa and per_ltsa:
-            if st.button("🚀 Enviar a Google Sheets (LTSA)", use_container_width=True, type="primary"):
+            per_ltsa_clean = per_ltsa.strip().upper()
+            periodos_existentes = df_rent_hist['PERIODO'].astype(str).str.strip().str.upper().tolist() if not df_rent_hist.empty and 'PERIODO' in df_rent_hist.columns else []
+            
+            reemplazar_ltsa = False
+            if per_ltsa_clean in periodos_existentes:
+                st.warning(f"⚠️ ¡Atención! Ya existen datos registrados para el corte **{per_ltsa_clean}**.")
+                reemplazar_ltsa = st.checkbox(f"Sobrescribir datos (Se borrarán los registros anteriores de {per_ltsa_clean} para evitar duplicados)", value=True)
+            
+            btn_disabled = (per_ltsa_clean in periodos_existentes) and not reemplazar_ltsa
+            
+            if st.button("🚀 Enviar a Google Sheets (LTSA)", use_container_width=True, type="primary", disabled=btn_disabled):
                 with st.spinner("Preparando archivo y subiendo a la nube..."):
                     df_raw_ltsa = extraer_df_desde_excel(file_ltsa, 'REPORTE')
                     cols_ltsa_gsheets = ['ORIGEN', 'PUNTO DE VENTA', 'OPERACIÓN', 'CÓDIGO', 'CIUDAD ORIGEN', 'CIUDAD DESTINO', 'CEDULA', 'NOMBRE', 'TIPO DE VEHICULO', 'PLACA', 'ESTADO', 'CONCEPTO TARIFA', 'TARIFA', 'Días/Horas', 'TOTAL', 'OBSERVACION OP', 'OBSERVACIONES ÉXITO', 'HORAS RVS', 'DIFERENCIA', 'TOTAL FACTURAR', 'OBSERVACIÓN', 'OPERADOR', 'PERIODO']
                     
                     bulk_data_ltsa = preparar_df_para_sheets(df_raw_ltsa, cols_ltsa_gsheets, per_ltsa)
-                    res_ltsa = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_HISTORICA", bulk_data_ltsa, clear_first=False)
+                    param_replace = per_ltsa_clean if reemplazar_ltsa else None
+                    res_ltsa = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_HISTORICA", bulk_data_ltsa, clear_first=False, replace_period=param_replace)
                     
                     if res_ltsa.get('status') == 'success':
                         st.success("✅ ¡Datos inyectados exitosamente! Haz clic en el botón gris de 'Sincronizar Base de Datos' en la parte superior para ver los resultados.")
@@ -1568,13 +1580,24 @@ with tab_rentabilidad:
         file_pollos = c4.file_uploader("Archivo Validador Excel (POLLOS)", type=["xlsx", "xls"], key="up_pollos")
         
         if file_pollos and per_pollos:
-            if st.button("🚀 Enviar a Google Sheets (POLLOS)", use_container_width=True, type="primary"):
+            per_pollos_clean = per_pollos.strip().upper()
+            periodos_existentes_p = df_rent_pollos['PERIODO'].astype(str).str.strip().str.upper().tolist() if not df_rent_pollos.empty and 'PERIODO' in df_rent_pollos.columns else []
+            
+            reemplazar_pollos = False
+            if per_pollos_clean in periodos_existentes_p:
+                st.warning(f"⚠️ ¡Atención! Ya existen datos registrados para el corte **{per_pollos_clean}**.")
+                reemplazar_pollos = st.checkbox(f"Sobrescribir datos (Se borrarán los registros anteriores de {per_pollos_clean} para evitar duplicados)", value=True, key="chk_pollos")
+            
+            btn_disabled_p = (per_pollos_clean in periodos_existentes_p) and not reemplazar_pollos
+
+            if st.button("🚀 Enviar a Google Sheets (POLLOS)", use_container_width=True, type="primary", disabled=btn_disabled_p):
                 with st.spinner("Preparando archivo y subiendo a la nube..."):
                     df_raw_pollos = extraer_df_desde_excel(file_pollos, 'COBRO')
                     cols_pollos_gsheets = ['ORIGEN', 'PUNTO DE VENTA', 'OPERACIÓN', 'CÓDIGO', 'CIUDAD ORIGEN', 'CIUDAD DESTINO', 'CEDULA', 'NOMBRE', 'TIPO DE VEHICULO', 'PLACA', 'ESTADO', 'CONCEPTO TARIFA', 'TARIFA', 'Días/Horas', 'TOTAL', 'OBSERVACION OP', 'OBSERVACIONES ÉXITO', 'HORAS RVS', 'DIFERENCIA', 'TOTAL FACTURAR', 'OBSERVACIÓN', 'OPERADOR', 'PERIODO']
                     
                     bulk_data_pollos = preparar_df_para_sheets(df_raw_pollos, cols_pollos_gsheets, per_pollos)
-                    res_pollos = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_POLLOS_PANADERIA", bulk_data_pollos, clear_first=False)
+                    param_replace_p = per_pollos_clean if reemplazar_pollos else None
+                    res_pollos = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_POLLOS_PANADERIA", bulk_data_pollos, clear_first=False, replace_period=param_replace_p)
                     
                     if res_pollos.get('status') == 'success':
                         st.success("✅ ¡Datos inyectados exitosamente! Haz clic en el botón gris de 'Sincronizar Base de Datos' en la parte superior para ver los resultados.")
@@ -1659,7 +1682,7 @@ with tab_rentabilidad:
                     else:
                         st.warning("⚠️ No se lograron cruzar los datos porque faltan las columnas de Cédula o Total Facturar en LTSA.")
                 else:
-                    st.info("💡 **Recordatorio:** Para ver el cruce Directo vs Terceros de esta quincena, asegúrate de haber visto el reporte de LTSA para que el sistema procese primero la facturación.")
+                    st.info("💡 **Recordatorio:** Para ver el cruce Directo vs Terceros de esta quincena, asegúrate de haber procesado primero el reporte de LTSA en la pestaña anterior.")
             else:
                 st.error("No se encontró la columna de IDENTIFICACIÓN o CÉDULA en la hoja de Personal Directo.")
         else:
