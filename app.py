@@ -179,10 +179,16 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
             else:
                 df_out[col] = ""
                 
-    df_out = df_out.fillna("")
+    # Solución al error Timestamp: Convertir fechas a texto plano
+    for col in df_out.columns:
+        if pd.api.types.is_datetime64_any_dtype(df_out[col]):
+            df_out[col] = df_out[col].dt.strftime('%Y-%m-%d')
+            
+    df_out = df_out.fillna("").astype(str).replace(["nan", "NaT", "None", "<NA>"], "")
+    
     for c in ['CEDULA', 'IDENTIFICACIÓN']:
         if c in df_out.columns:
-            df_out[c] = df_out[c].astype(str).str.replace(r'\.0$', '', regex=True).str.replace('nan', '', regex=True).str.strip()
+            df_out[c] = df_out[c].replace(r'\.0$', '', regex=True).str.strip()
             
     return df_out.values.tolist()
 
