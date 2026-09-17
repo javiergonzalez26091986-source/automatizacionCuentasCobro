@@ -157,7 +157,7 @@ def extraer_df_desde_excel(archivo, sheet_buscada=None):
     return df
 
 def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
-    df_out = pd.DataFrame()
+    df_out = pd.DataFrame(columns=cols_esperadas)
     for col in cols_esperadas:
         if col == 'PERIODO' and periodo:
             df_out[col] = periodo
@@ -168,6 +168,7 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
             elif col == 'NOMBRE' or col == 'NOMBRE COMPLETO': 
                 alias.extend(['NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO'])
             elif col == 'TOTAL FACTURAR': 
+                # SOLUCIÓN DE CEROS: Busca "TOTAL" si "TOTAL FACTURAR" está vacía en Excel
                 alias.extend(['TOTAL', 'VALOR TOTAL', 'NETO', 'VALOR_TOTAL'])
             elif col == 'TIPO DE VEHICULO': 
                 alias.extend(['VEHICULO', 'CATEGORIA'])
@@ -180,16 +181,20 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
             else:
                 df_out[col] = ""
                 
-    # Solución al error Timestamp: Convertir fechas a texto plano
+    # SOLUCIÓN DE NÚMEROS GIGANTES: Asegurar formato correcto por tipo de dato
     for col in df_out.columns:
         if pd.api.types.is_datetime64_any_dtype(df_out[col]):
             df_out[col] = df_out[col].dt.strftime('%Y-%m-%d')
+        elif col in ['CEDULA', 'IDENTIFICACIÓN', 'CÓDIGO INGRESO']:
+            # Cédulas como string estricto
+            df_out[col] = df_out[col].astype(str).replace(r'\.0$', '', regex=True).replace(['nan', 'NaT', 'None'], '').str.strip()
+        elif col in ['TOTAL', 'TOTAL FACTURAR', 'TARIFA', 'NETO', 'VALOR TOTAL']:
+            # Dinero como FLOAT estricto (Evita que Google Sheets de Colombia multiplique valores)
+            df_out[col] = pd.to_numeric(df_out[col], errors='coerce').fillna(0)
             
-    df_out = df_out.fillna("").astype(str).replace(["nan", "NaT", "None", "<NA>"], "")
-    
-    for c in ['CEDULA', 'IDENTIFICACIÓN']:
-        if c in df_out.columns:
-            df_out[c] = df_out[c].replace(r'\.0$', '', regex=True).str.strip()
+    # Llenar NaNs sin convertir toda la tabla a texto
+    df_out = df_out.fillna("")
+    df_out = df_out.replace(['nan', 'NaN', 'NaT', '<NA>'], "")
             
     return df_out.values.tolist()
 
@@ -920,8 +925,7 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte
             st.session_state['df_raw_LTSA'] = df_cobro.copy()
             
         col_ced_cobro = obtener_nombre_columna(df_cobro, ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN'])
-        # SOLUCIÓN DE CEROS: Ahora el programa busca 'TOTAL' primero que 'TOTAL FACTURAR'
-        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR', 'NETO'])
+        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL FACTURAR', 'TOTAL', 'VALOR TOTAL', 'NETO'])
         col_vehiculo = obtener_nombre_columna(df_cobro, ['TIPO DE VEHICULO', 'VEHICULO', 'CATEGORIA'])
         col_almacen = obtener_nombre_columna(df_cobro, ['PUNTO DE VENTA', 'ALMACEN', 'CLIENTE'])
         col_nombre_cobro = obtener_nombre_columna(df_cobro, ['NOMBRE', 'NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO']) 
@@ -1645,7 +1649,6 @@ with tab_rentabilidad:
                 if 'df_raw_LTSA' in st.session_state:
                     df_ltsa = st.session_state['df_raw_LTSA'].copy()
                     col_ced_ltsa = obtener_nombre_columna(df_ltsa, ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION'])
-                    # SOLUCIÓN DE CEROS APLICADA AQUÍ TAMBIÉN:
                     col_tot_ltsa = obtener_nombre_columna(df_ltsa, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR'])
                     
                     if col_ced_ltsa and col_tot_ltsa:
