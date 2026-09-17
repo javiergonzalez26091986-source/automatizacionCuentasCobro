@@ -120,10 +120,18 @@ def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False, replace_p
         "bulk_data": bulk_data
     }
     try:
-        response = requests.post(url, json=payload)
-        return response.json()
+        # allow_redirects=True es obligatorio para evitar errores "silenciosos" con Google Scripts
+        response = requests.post(url, json=payload, allow_redirects=True, timeout=30)
+        if response.status_code != 200:
+            return {"status": "error", "message": f"HTTP {response.status_code}: {response.text[:100]}"}
+        
+        try:
+            return response.json()
+        except ValueError:
+            return {"status": "error", "message": f"Respuesta no válida del servidor: {response.text[:100]}"}
+            
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": str(e) or "Error de conexión desconocido."}
 
 def extraer_df_desde_excel(archivo, sheet_buscada=None):
     xls = pd.ExcelFile(archivo)
@@ -168,7 +176,6 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
             elif col == 'NOMBRE' or col == 'NOMBRE COMPLETO': 
                 alias.extend(['NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO'])
             elif col == 'TOTAL FACTURAR': 
-                # SOLUCIÓN DE CEROS: Busca "TOTAL" si "TOTAL FACTURAR" está vacía en Excel
                 alias.extend(['TOTAL', 'VALOR TOTAL', 'NETO', 'VALOR_TOTAL'])
             elif col == 'TIPO DE VEHICULO': 
                 alias.extend(['VEHICULO', 'CATEGORIA'])
@@ -181,20 +188,17 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
             else:
                 df_out[col] = ""
                 
-    # SOLUCIÓN DE NÚMEROS GIGANTES: Asegurar formato correcto por tipo de dato
+    # Blindaje contra errores de formato (Fechas, NaNs ocultos, objetos Timestamp)
     for col in df_out.columns:
-        if pd.api.types.is_datetime64_any_dtype(df_out[col]):
-            df_out[col] = df_out[col].dt.strftime('%Y-%m-%d')
-        elif col in ['CEDULA', 'IDENTIFICACIÓN', 'CÓDIGO INGRESO']:
-            # Cédulas como string estricto
-            df_out[col] = df_out[col].astype(str).replace(r'\.0$', '', regex=True).replace(['nan', 'NaT', 'None'], '').str.strip()
-        elif col in ['TOTAL', 'TOTAL FACTURAR', 'TARIFA', 'NETO', 'VALOR TOTAL']:
-            # Dinero como FLOAT estricto (Evita que Google Sheets de Colombia multiplique valores)
+        if col in ['TOTAL', 'TOTAL FACTURAR', 'TARIFA', 'NETO', 'VALOR TOTAL']:
             df_out[col] = pd.to_numeric(df_out[col], errors='coerce').fillna(0)
-            
-    # Llenar NaNs sin convertir toda la tabla a texto
-    df_out = df_out.fillna("")
-    df_out = df_out.replace(['nan', 'NaN', 'NaT', '<NA>'], "")
+        else:
+            if pd.api.types.is_datetime64_any_dtype(df_out[col]):
+                df_out[col] = df_out[col].dt.strftime('%Y-%m-%d')
+                
+            # Forzamos conversión a STRING absoluto para evitar crasheos de JSON
+            df_out[col] = df_out[col].astype(str).replace(r'\.0$', '', regex=True)
+            df_out[col] = df_out[col].replace(['nan', 'NaN', 'NaT', '<NA>', 'None'], "")
             
     return df_out.values.tolist()
 
@@ -925,7 +929,7 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte
             st.session_state['df_raw_LTSA'] = df_cobro.copy()
             
         col_ced_cobro = obtener_nombre_columna(df_cobro, ['CÉDULA', 'CEDULA', 'CC', 'C.C.', 'IDENTIFICACION', 'IDENTIFICACIÓN'])
-        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL FACTURAR', 'TOTAL', 'VALOR TOTAL', 'NETO'])
+        col_total_cobro = obtener_nombre_columna(df_cobro, ['TOTAL', 'VALOR TOTAL', 'TOTAL FACTURAR', 'NETO'])
         col_vehiculo = obtener_nombre_columna(df_cobro, ['TIPO DE VEHICULO', 'VEHICULO', 'CATEGORIA'])
         col_almacen = obtener_nombre_columna(df_cobro, ['PUNTO DE VENTA', 'ALMACEN', 'CLIENTE'])
         col_nombre_cobro = obtener_nombre_columna(df_cobro, ['NOMBRE', 'NOMBRES', 'CONDUCTOR', 'EMPLEADO', 'BENEFICIARIO']) 
