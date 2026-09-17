@@ -163,7 +163,6 @@ def extraer_df_desde_excel(archivo, sheet_buscada=None):
     df = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
     df.columns = df.columns.astype(str).str.strip().str.upper()
     
-    # --- LIMPIEZA INTELIGENTE (Elimina filas vacías o totales finales) ---
     col_id = None
     for col in df.columns:
         if any(alias in col for alias in ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION', 'IDENTIFICACIÓN']):
@@ -935,22 +934,22 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
 # ==============================================================================
 # FUNCIÓN DE RENTABILIDAD CON CONEXIÓN DIRECTA A DB (GOOGLE SHEETS)
 # ==============================================================================
-def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte_evaluado, total_nomina_bd):
+def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, corte_a_evaluar, total_nomina_bd_rent):
     try:
+        col_periodo = obtener_nombre_columna(df_cobro_raw, ['PERIODO', 'CORTE'])
+        
         # Filtro global vs por corte
-        if corte_evaluado == "GLOBAL":
+        if corte_a_evaluar == "GLOBAL":
             df_cobro = df_cobro_raw.copy()
             st.info(f"Mostrando histórico global de rentabilidad acumulada para {titulo_modulo}.")
+        elif col_periodo:
+            df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_a_evaluar).strip().upper()].copy()
         else:
-            col_periodo = obtener_nombre_columna(df_cobro_raw, ['PERIODO', 'CORTE'])
-            if col_periodo:
-                df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_evaluado).strip().upper()].copy()
-            else:
-                df_cobro = df_cobro_raw.copy()
-                st.warning(f"No se detectó columna de PERIODO en la tabla de {titulo_modulo}. Se evaluará toda la tabla.")
+            df_cobro = df_cobro_raw.copy()
+            st.warning(f"No se detectó columna de PERIODO en la tabla de {titulo_modulo}. Se evaluará toda la tabla.")
 
         if df_cobro.empty:
-            st.warning(f"No hay registros en la base de datos de {titulo_modulo} para el periodo '{corte_evaluado}'.")
+            st.warning(f"No hay registros en la base de datos de {titulo_modulo} para el periodo '{corte_a_evaluar}'.")
             return
 
         if titulo_modulo == "LTSA":
@@ -981,7 +980,7 @@ def procesar_rentabilidad_db(df_cobro_raw, titulo_modulo, df_pagos_reales, corte
         cobro_agrupado.rename(columns={col_total_cobro: 'TOTAL_COBRADO_LTSA'}, inplace=True)
         
         # OUTER JOIN: Cruce bidireccional absoluto
-        df_cruce = pd.merge(cobro_agrupado, df_pagos_reales, on='_cedula_clean', how='outer')
+        df_cruce = pd.merge(cobro_agrupado, df_pagos_reales_rent, on='_cedula_clean', how='outer')
         df_cruce['TOTAL_COBRADO_LTSA'] = df_cruce['TOTAL_COBRADO_LTSA'].fillna(0)
         df_cruce['VALOR_PAGADO_NETO'] = df_cruce['VALOR_PAGADO_NETO'].fillna(0)
         
@@ -1125,19 +1124,18 @@ if not col_prestador or not col_titular_banco:
     st.error("Faltan las columnas que diferencian a quien cobra del titular del banco. Verifique sus nombres en el Sheets.")
     st.stop()
 
-# LA LISTA GENERAL VUELVE A SER NORMAL (Solo periodos)
+# LA LISTA GENERAL SUPERIOR VUELVE A SER NORMAL (Solo periodos)
 cortes_disponibles = [c for c in df_pagos_completo['CORTE'].unique() if str(c).strip() != "" and str(c).lower() != "nan"]
 
 st.divider()
 
 corte_seleccionado = st.selectbox("📅 Seleccione el Corte a procesar / visualizar:", cortes_disponibles)
 
-# El df general sigue siendo solo para el corte seleccionado
+# El df general para el resto del programa
 df_pagos_corte = df_pagos_completo[df_pagos_completo['CORTE'] == corte_seleccionado].copy()
 
 df_pagos_corte['_ced_prestador_clean'] = df_pagos_corte[col_cedula_prestador].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
 df_pagos_corte['_ced_banco_clean'] = df_pagos_corte[col_cedula_banco].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
-
 
 tab_generador, tab_informes, tab_rentabilidad = st.tabs([
     "📄 Generador de Documentos", 
@@ -1337,7 +1335,7 @@ with tab_generador:
                     for (ced_prestador, ced_banco), grupo_titular in grupos:
                         if ced_prestador in ['nan', '', 'None']: continue
                         
-                        calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco, col_estado, col_anticipos, col_otros_desc, col_valor_dia)
+                        calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_ced_prestador, col_titular_banco, col_ced_banco, col_estado, col_anticipos, col_otros_desc, col_valor_dia)
                         
                         if not calculos: continue
                         
@@ -1549,18 +1547,29 @@ with tab_informes:
 with tab_rentabilidad:
     st.markdown("### 📈 Módulo de Rentabilidad Operativa")
     
-    vista_rentabilidad = st.radio("👀 Selecciona la vista de rentabilidad:", 
-                                  [f"Ver solo el corte: {corte_seleccionado}", "🌐 Ver histórico GLOBAL (Todos los cortes)"], 
-                                  horizontal=True)
+    # 1. Crear una lista de todos los periodos posibles que existan en Pagos, LTSA y Pollos
+    periodos_pagos = df_pagos_completo['CORTE'].dropna().astype(str).str.strip().str.upper().tolist()
+    periodos_ltsa = df_rent_hist['PERIODO'].dropna().astype(str).str.strip().str.upper().tolist() if not df_rent_hist.empty and 'PERIODO' in df_rent_hist.columns else []
+    periodos_pollos = df_rent_pollos['PERIODO'].dropna().astype(str).str.strip().str.upper().tolist() if not df_rent_pollos.empty and 'PERIODO' in df_rent_pollos.columns else []
     
-    if "GLOBAL" in vista_rentabilidad:
-        corte_a_evaluar = "GLOBAL"
+    todos_periodos = list(set(periodos_pagos + periodos_ltsa + periodos_pollos))
+    todos_periodos = [p for p in todos_periodos if p not in ["", "NAN", "NONE"]]
+    todos_periodos.sort()
+    
+    # 2. Agregar la opción Global al inicio
+    opciones_rentabilidad = ["🌐 TODOS LOS CORTES (GLOBAL)"] + todos_periodos
+    
+    # 3. Mostrar la lista desplegable INDEPENDIENTE solo para rentabilidad
+    corte_a_evaluar = st.selectbox("👀 Selecciona el corte a analizar en Rentabilidad:", opciones_rentabilidad)
+    
+    if corte_a_evaluar == "🌐 TODOS LOS CORTES (GLOBAL)":
+        corte_evaluado_str = "GLOBAL"
         df_pagos_base = df_pagos_completo.copy()
     else:
-        corte_a_evaluar = corte_seleccionado
-        df_pagos_base = df_pagos_corte.copy()
+        corte_evaluado_str = corte_a_evaluar
+        df_pagos_base = df_pagos_completo[df_pagos_completo['CORTE'] == corte_a_evaluar].copy()
 
-    # Ahora calculamos los pagos reales basados en la selección (GLOBAL o ESPECÍFICO)
+    # Recalculamos los PAGOS REALES dependiendo de la selección de este menú
     col_total_pagar = obtener_nombre_columna(df_pagos_base, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
     col_ced_conductor = obtener_nombre_columna(df_pagos_base, ['CÉDULA', 'CEDULA', 'C.C.', 'CC'])
     col_nombre_conductor = obtener_nombre_columna(df_pagos_base, ['CONDUCTOR', 'NOMBRES', 'NOMBRE'])
@@ -1574,12 +1583,9 @@ with tab_rentabilidad:
             VALOR_PAGADO_NETO=('_valor_pagar_num', 'sum')
         ).reset_index()
         
-        df_pagos_agrupados = df_pagos_agrupados[df_pagos_agrupados['_cedula_clean'].isin(['nan', '', 'None']) == False]
-        
-        df_pagos_reales_rent = df_pagos_agrupados
-        total_nomina_bd_rent = df_pagos_agrupados['VALOR_PAGADO_NETO'].sum()
+        df_pagos_reales_rent = df_pagos_agrupados[df_pagos_agrupados['_cedula_clean'].isin(['nan', '', 'None']) == False]
+        total_nomina_bd_rent = df_pagos_reales_rent['VALOR_PAGADO_NETO'].sum()
     else:
-        st.error("No se detectaron las columnas de CÉDULA o TOTAL A PAGAR en la hoja de pagos.")
         df_pagos_reales_rent = pd.DataFrame()
         total_nomina_bd_rent = 0
 
@@ -1590,7 +1596,7 @@ with tab_rentabilidad:
         st.markdown("#### 📤 1. Cargar Validador a la Base de Datos")
         c1, c2 = st.columns([1, 2])
         # Solo pre-llenamos si no está en GLOBAL
-        per_ltsa = c1.text_input("Digita el PERIODO (Corte) a inyectar:", value=corte_seleccionado if corte_a_evaluar != "GLOBAL" else "", key="per_ltsa")
+        per_ltsa = c1.text_input("Digita el PERIODO (Corte) a inyectar:", value=corte_a_evaluar if corte_a_evaluar != "🌐 TODOS LOS CORTES (GLOBAL)" else "", key="per_ltsa")
         file_ltsa = c2.file_uploader("Archivo Validador Excel (LTSA)", type=["xlsx", "xls"], key="up_ltsa")
         
         if file_ltsa and per_ltsa:
@@ -1622,13 +1628,13 @@ with tab_rentabilidad:
                         st.error(f"Error al subir: {res_ltsa.get('message')}")
 
         st.divider()
-        if corte_a_evaluar == "GLOBAL":
+        if corte_evaluado_str == "GLOBAL":
             st.markdown(f"#### 📊 2. Tablero de Resultados (HISTÓRICO GLOBAL ACUMULADO)")
         else:
-            st.markdown(f"#### 📊 2. Tablero de Resultados (Corte: {corte_a_evaluar})")
+            st.markdown(f"#### 📊 2. Tablero de Resultados (Corte: {corte_evaluado_str})")
             
         if not df_rent_hist.empty:
-            procesar_rentabilidad_db(df_rent_hist, "LTSA", df_pagos_reales_rent, corte_a_evaluar, total_nomina_bd_rent)
+            procesar_rentabilidad_db(df_rent_hist, "LTSA", df_pagos_reales_rent, corte_evaluado_str, total_nomina_bd_rent)
         else:
             st.info("No hay datos en la base de datos para mostrar. Sube el validador en el paso 1.")
 
@@ -1636,7 +1642,7 @@ with tab_rentabilidad:
     with sub_pollos:
         st.markdown("#### 📤 1. Cargar Validador a la Base de Datos")
         c3, c4 = st.columns([1, 2])
-        per_pollos = c3.text_input("Digita el PERIODO (Corte) a inyectar:", value=corte_seleccionado if corte_a_evaluar != "GLOBAL" else "", key="per_pollos")
+        per_pollos = c3.text_input("Digita el PERIODO (Corte) a inyectar:", value=corte_a_evaluar if corte_a_evaluar != "🌐 TODOS LOS CORTES (GLOBAL)" else "", key="per_pollos")
         file_pollos = c4.file_uploader("Archivo Validador Excel (POLLOS)", type=["xlsx", "xls"], key="up_pollos")
         
         if file_pollos and per_pollos:
@@ -1668,13 +1674,13 @@ with tab_rentabilidad:
                         st.error(f"Error al subir: {res_pollos.get('message')}")
 
         st.divider()
-        if corte_a_evaluar == "GLOBAL":
+        if corte_evaluado_str == "GLOBAL":
             st.markdown(f"#### 📊 2. Tablero de Resultados (HISTÓRICO GLOBAL ACUMULADO)")
         else:
-            st.markdown(f"#### 📊 2. Tablero de Resultados (Corte: {corte_a_evaluar})")
+            st.markdown(f"#### 📊 2. Tablero de Resultados (Corte: {corte_evaluado_str})")
             
         if not df_rent_pollos.empty:
-            procesar_rentabilidad_db(df_rent_pollos, "Pollos y Panadería", df_pagos_reales_rent, corte_a_evaluar, total_nomina_bd_rent)
+            procesar_rentabilidad_db(df_rent_pollos, "Pollos y Panadería", df_pagos_reales_rent, corte_evaluado_str, total_nomina_bd_rent)
         else:
             st.info("No hay datos en la base de datos para mostrar. Sube el validador en el paso 1.")
 
@@ -1703,10 +1709,10 @@ with tab_rentabilidad:
                         st.error(f"Error al subir: {res_directo.get('message')}")
 
         st.divider()
-        if corte_a_evaluar == "GLOBAL":
+        if corte_evaluado_str == "GLOBAL":
             st.markdown(f"#### 📊 2. Tablero Operativo: Directos vs Terceros (HISTÓRICO GLOBAL)")
         else:
-            st.markdown(f"#### 📊 2. Tablero Operativo: Directos vs Terceros (Corte: {corte_a_evaluar})")
+            st.markdown(f"#### 📊 2. Tablero Operativo: Directos vs Terceros (Corte: {corte_evaluado_str})")
             
         if not df_rent_directo.empty:
             col_id = obtener_nombre_columna(df_rent_directo, ['IDENTIFICACIÓN', 'IDENTIFICACION', 'CÉDULA', 'CEDULA', 'CC', 'DOCUMENTO'])
@@ -1727,7 +1733,6 @@ with tab_rentabilidad:
                         
                         ltsa_grouped = df_ltsa.groupby('_cedula_clean')['TOTAL_COBRADO'].sum().reset_index()
                         
-                        # Cruce exterior con df_pagos_reales_rent (Que se adapta a si la vista es GLOBAL o de CORTE)
                         df_cruce_directo = pd.merge(ltsa_grouped, df_pagos_reales_rent, on='_cedula_clean', how='outer')
                         df_cruce_directo['TOTAL_COBRADO'] = df_cruce_directo['TOTAL_COBRADO'].fillna(0)
                         df_cruce_directo['VALOR_PAGADO_NETO'] = df_cruce_directo['VALOR_PAGADO_NETO'].fillna(0)
