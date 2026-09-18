@@ -1633,6 +1633,7 @@ with tab_rentabilidad:
                         st.success("✅ ¡Datos inyectados exitosamente! Refrescando tablero automáticamente...")
                         cargar_datos.clear()
                         st.cache_data.clear()
+                        st.session_state.pop('up_ltsa', None)
                         st.rerun()
                     else:
                         st.error(f"Error al subir: {res_ltsa.get('message')}")
@@ -1686,6 +1687,7 @@ with tab_rentabilidad:
                         st.success("✅ ¡Datos de Facturación y Pago inyectados exitosamente! Refrescando tablero automáticamente...")
                         cargar_datos.clear()
                         st.cache_data.clear()
+                        st.session_state.pop('up_pollos', None)
                         st.rerun()
                     else:
                         st.error(f"Error al subir COBRO: {res_pollos.get('message')} | PAGO: {res_pago.get('message')}")
@@ -1752,6 +1754,7 @@ with tab_rentabilidad:
                         st.success("✅ ¡Lista inyectada exitosamente! Refrescando tablero automáticamente...")
                         cargar_datos.clear()
                         st.cache_data.clear()
+                        st.session_state.pop('up_directo', None)
                         st.rerun()
                     else:
                         st.error(f"Error al subir: {res_directo.get('message')}")
