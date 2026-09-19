@@ -236,6 +236,11 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
 
 def limpiar_dinero(val):
     if pd.isna(val) or val == "": return 0.0
+    
+    # Si el dato ya es un número (entero o decimal), lo devuelve intacto
+    if isinstance(val, (int, float)):
+        return float(val)
+        
     s = str(val).upper().replace('$', '').replace(',', '').replace('.', '').replace(' ', '')
     try: return float(s)
     except: return 0.0
