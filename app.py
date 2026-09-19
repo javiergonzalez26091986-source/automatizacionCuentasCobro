@@ -1221,7 +1221,7 @@ with tab_generador:
                     for (ced_prestador, ced_banco), grupo_titular in grupos:
                         if ced_prestador in ['nan', '', 'None']: continue
                         
-                        calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_ced_prestador, col_titular_banco, col_ced_banco, col_estado, col_anticipos, col_otros_desc, col_valor_dia)
+                        calculos = calcular_valores_agrupados(grupo_titular, df_fuera, corte_seleccionado, col_prestador, col_cedula_prestador, col_titular_banco, col_cedula_banco, col_estado, col_anticipos, col_otros_desc, col_valor_dia)
                         
                         if not calculos: continue
                         
