@@ -235,16 +235,36 @@ def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
     return cleaned_list
 
 def limpiar_dinero(val):
-    if pd.isna(val) or val == "": return 0.0
+    if pd.isna(val) or str(val).strip() == "": return 0.0
     
-    # Si el dato ya es un número (entero o decimal), lo devuelve intacto
-    if isinstance(val, (int, float)):
-        return float(val)
-        
-    s = str(val).upper().replace('$', '').replace(',', '').replace('.', '').replace(' ', '')
+    # Si ya es un número puro, lo pasa sin tocarlo
+    if isinstance(val, (int, float)): return float(val)
+    
+    s = str(val).strip().upper().replace('$', '').replace(' ', '')
+    
+    # Si tiene coma y punto, asumimos el último como el decimal
+    if '.' in s and ',' in s:
+        if s.rfind(',') > s.rfind('.'):
+            s = s.replace('.', '').replace(',', '.')
+        else:
+            s = s.replace(',', '')
+    # Si solo tiene coma
+    elif ',' in s:
+        parts = s.split(',')
+        if len(parts) == 2 and len(parts[1]) != 3:
+            s = s.replace(',', '.')
+        else:
+            s = s.replace(',', '')
+    # Si solo tiene puntos
+    elif '.' in s:
+        parts = s.split('.')
+        # Si tiene más de un punto (ej. 1.250.000) o si después del punto hay exactamente 3 dígitos (ej. 25.000) -> Es un separador de miles.
+        if len(parts) > 2 or (len(parts) == 2 and len(parts[1]) == 3):
+            s = s.replace('.', '')
+        # Si tiene otra cantidad de dígitos (ej. 206247.11699), es un decimal del sistema y se deja intacto.
+            
     try: return float(s)
     except: return 0.0
-
 def limpiar_texto(txt):
     if pd.isna(txt): return ""
     return re.sub(r'\s+', ' ', str(txt).upper().strip())
