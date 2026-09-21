@@ -154,6 +154,7 @@ CODIGOS_BANCOS = {
     "PLATA S.A. COMPAÑÍA DE FINANCIAMIENTO": "1843", 
     "TUYA S.A": "1026"
 }
+
 def obtener_fecha_actual():
     meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
     zona_colombia = timezone(timedelta(hours=-5))
@@ -318,6 +319,7 @@ def limpiar_dinero(val):
             
     try: return float(s)
     except: return 0.0
+
 def limpiar_texto(txt):
     if pd.isna(txt): return ""
     return re.sub(r'\s+', ' ', str(txt).upper().strip())
@@ -722,7 +724,7 @@ def agregar_pagina_pdf_doc_equivalente(pdf, datos):
     pdf.set_font('helvetica', 'B', 9)
     pdf.cell(80, 5, "________________________________________________", 0, 1)
     pdf.cell(80, 5, "FIRMA PRESTADOR DEL SERVICIO", 0, 1)
-    pdf.cell(80, 5, f"{datos['tipo_documento_pab']}: {datos['cedula_prestador']}", 0, 1)
+    pdf.cell(80, 5, f"C.C. / NIT: {datos['cedula_prestador']}", 0, 1)
     pdf.cell(80, 5, f"NOMBRE: {datos['nombre_prestador']}", 0, 1)
 
 def construir_hoja_documento_equivalente_excel(ws, datos):
@@ -839,7 +841,7 @@ def construir_hoja_documento_equivalente_excel(ws, datos):
     ws[f'B{fila_firma}'] = "________________________________________________"
     ws[f'B{fila_firma+1}'] = "FIRMA PRESTADOR DEL SERVICIO"
     ws[f'B{fila_firma+1}'].font = bold_font
-    ws[f'B{fila_firma+2}'] = f"{datos['tipo_documento_pab']}: {datos['cedula_prestador']}"
+    ws[f'B{fila_firma+2}'] = f"C.C. / NIT: {datos['cedula_prestador']}"
     ws[f'B{fila_firma+3}'] = f"NOMBRE: {datos['nombre_prestador']}"
 
     ws.column_dimensions['B'].width = 16; ws.column_dimensions['C'].width = 12; ws.column_dimensions['D'].width = 12
@@ -1277,6 +1279,11 @@ with tab_generador:
                     st.error(f"Error procesando los datos de esta persona: {ex}")
 
         elif "Masiva" in modo_trabajo:
+            # Control de estado para no perder los archivos al hacer click en descargar
+            if 'ultimo_corte_masiva' not in st.session_state or st.session_state['ultimo_corte_masiva'] != corte_seleccionado:
+                st.session_state['datos_descarga_masiva'] = None
+                st.session_state['ultimo_corte_masiva'] = corte_seleccionado
+
             if st.button("🚀 Procesar Lote General", use_container_width=True, type="primary"):
                 mensaje_carga = st.info(f"📥 Procesando la información y empaquetando archivos de forma inteligente...")
                 
@@ -1338,7 +1345,6 @@ with tab_generador:
                     zip_cuentas_banco_io = io.BytesIO()
                     if count_banco > 0:
                         with zipfile.ZipFile(zip_cuentas_banco_io, "w", zipfile.ZIP_DEFLATED) as zipf: zipf.writestr("Cuentas_de_Cobro_Aprobadas.pdf", get_pdf_bytes(pdf_ct_banco))
-                    zip_cuentas_banco_io.seek(0)
                     
                     zip_eq_banco_io = io.BytesIO()
                     if count_banco > 0:
@@ -1346,52 +1352,89 @@ with tab_generador:
                             zipf.writestr("Documentos_Equivalentes_Aprobados.pdf", get_pdf_bytes(pdf_eq_banco))
                             excel_io = io.BytesIO(); wb_eq_banco.save(excel_io); excel_io.seek(0)
                             zipf.writestr("Documentos_Equivalentes_Excel.xlsx", excel_io.read())
-                    zip_eq_banco_io.seek(0)
                     
                     df_banco = pd.DataFrame(pagos_procesados_banco)
                     archivo_pab_bytes = generar_excel_pab(df_banco, corte_seleccionado) if len(df_banco) > 0 else b""
                     
-                    mensaje_carga.empty() 
-                    st.success(f"✅ ¡Éxito! Procesamiento finalizado. **{count_banco}** pagos aprobados listos para pago en banco.")
-                    st.divider()
-
+                    excel_nuevos_bytes = b""
+                    pdf_ct_nuevos_bytes = b""
+                    zip_eq_nuevos_bytes = b""
                     if count_nuevos > 0:
                         df_nuevos = pd.DataFrame([{'NOMBRES Y APELLIDOS': d['nombre_titular_banco'], 'CÉDULA': d['cedula_titular_banco'], 'BANCO': d['banco'], 'TIPO CUENTA': d['tipo_cuenta'], 'NO. CUENTA': d['num_cuenta']} for d in nuevos_detectados])
                         excel_nuevos_io = io.BytesIO(); df_nuevos.to_excel(excel_nuevos_io, index=False, sheet_name="PERSONAL NUEVO"); excel_nuevos_io.seek(0)
-                        st.error(f"🚨 **ATENCIÓN - SE DETECTARON {count_nuevos} PERSONAS NUEVAS**")
-                        colN1, colN2, colN3 = st.columns(3)
-                        colN1.download_button("1️⃣ 📥 Listado Excel (Para Don José)", data=excel_nuevos_io, file_name="Listado_Nuevos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                        colN2.download_button("2️⃣ 📥 Cuentas de Cobro (Solo Nuevos)", data=get_pdf_bytes(pdf_ct_nuevos), file_name="Cuentas_Cobro_Nuevos.pdf", mime="application/pdf", use_container_width=True)
+                        excel_nuevos_bytes = excel_nuevos_io.read()
+                        pdf_ct_nuevos_bytes = get_pdf_bytes(pdf_ct_nuevos)
                         zip_eq_nuevos_io = io.BytesIO()
                         with zipfile.ZipFile(zip_eq_nuevos_io, "w", zipfile.ZIP_DEFLATED) as zipf:
                             zipf.writestr("Docs_Equivalentes_Nuevos.pdf", get_pdf_bytes(pdf_eq_nuevos)); excel_io = io.BytesIO(); wb_eq_nuevos.save(excel_io); excel_io.seek(0)
                             zipf.writestr("Docs_Equivalentes_Nuevos_Excel.xlsx", excel_io.read())
                         zip_eq_nuevos_io.seek(0)
-                        colN3.download_button("3️⃣ 📥 Docs Equivalentes (Solo Nuevos)", data=zip_eq_nuevos_io, file_name="Docs_Equivalentes_Nuevos.zip", mime="application/zip", use_container_width=True)
-                        st.divider()
-                    
+                        zip_eq_nuevos_bytes = zip_eq_nuevos_io.read()
+
+                    pdf_ct_ceros_bytes = b""
+                    zip_eq_ceros_bytes = b""
+                    nombres_ceros = ""
                     if count_ceros > 0:
                         nombres_ceros = "\n* ".join([f"👤 {d['nombre_prestador']} (C.C: {d['cedula_prestador']})" for d in ceros_detectados])
-                        st.warning(f"⚠️ **SE DETECTARON {count_ceros} SALDOS EN CERO O NEGATIVOS**\n* {nombres_ceros}")
-                        colC1, colC2 = st.columns(2)
-                        colC1.download_button("1️⃣ 📥 Cuentas de Cobro (Saldos Cero)", data=get_pdf_bytes(pdf_ct_ceros), file_name="Cuentas_Cobro_Ceros.pdf", mime="application/pdf", use_container_width=True)
+                        pdf_ct_ceros_bytes = get_pdf_bytes(pdf_ct_ceros)
                         zip_eq_ceros_io = io.BytesIO()
                         with zipfile.ZipFile(zip_eq_ceros_io, "w", zipfile.ZIP_DEFLATED) as zipf:
                             zipf.writestr("Docs_Equivalentes_Ceros.pdf", get_pdf_bytes(pdf_ct_ceros)); excel_io = io.BytesIO(); wb_eq_ceros.save(excel_io); excel_io.seek(0)
                             zipf.writestr("Docs_Equivalentes_Ceros_Excel.xlsx", excel_io.read())
                         zip_eq_ceros_io.seek(0)
-                        colC2.download_button("2️⃣ 📥 Docs Equivalentes (Saldos Cero)", data=zip_eq_ceros_io, file_name="Docs_Equivalentes_Ceros.zip", mime="application/zip", use_container_width=True)
-                        st.divider()
+                        zip_eq_ceros_bytes = zip_eq_ceros_io.read()
 
-                    st.markdown(f"### 📥 Soportes Contables Aprobados (Los {count_banco} del Banco)")
-                    colD1, colD2, colD3 = st.columns(3)
-                    colD1.download_button(label="1️⃣ Soportes: Cuentas de Cobro (.ZIP)", data=zip_cuentas_banco_io, file_name=f"Cuentas_Cobro_Aprobadas_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip", mime="application/zip", use_container_width=True, disabled=(count_banco == 0))
-                    colD2.download_button(label="2️⃣ Soportes: Docs. Equivalentes (.ZIP)", data=zip_eq_banco_io, file_name=f"Docs_Equivalentes_Aprobados_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip", mime="application/zip", use_container_width=True, disabled=(count_banco == 0))
-                    colD3.download_button(label="3️⃣ Archivo Excel PAB Banco (.XLSX)", data=archivo_pab_bytes, file_name=f"FORMATOPAB_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, disabled=(count_banco == 0))
+                    # Guardar en memoria para que no desaparezcan al descargar
+                    st.session_state['datos_descarga_masiva'] = {
+                        'count_banco': count_banco,
+                        'count_nuevos': count_nuevos,
+                        'count_ceros': count_ceros,
+                        'zip_cuentas_banco': zip_cuentas_banco_io.getvalue(),
+                        'zip_eq_banco': zip_eq_banco_io.getvalue(),
+                        'archivo_pab_bytes': archivo_pab_bytes,
+                        'excel_nuevos': excel_nuevos_bytes,
+                        'pdf_ct_nuevos': pdf_ct_nuevos_bytes,
+                        'zip_eq_nuevos': zip_eq_nuevos_bytes,
+                        'pdf_ct_ceros': pdf_ct_ceros_bytes,
+                        'zip_eq_ceros': zip_eq_ceros_bytes,
+                        'nombres_ceros': nombres_ceros
+                    }
+                    mensaje_carga.empty()
 
                 except Exception as e:
                     mensaje_carga.empty()
                     st.error(f"Error en el proceso: {e}")
+
+            # Mostrar UI de descarga desde la memoria guardada (Session State)
+            if st.session_state.get('datos_descarga_masiva'):
+                datos_masiva = st.session_state['datos_descarga_masiva']
+                count_banco = datos_masiva['count_banco']
+                count_nuevos = datos_masiva['count_nuevos']
+                count_ceros = datos_masiva['count_ceros']
+
+                st.success(f"✅ ¡Éxito! Procesamiento finalizado. **{count_banco}** pagos aprobados listos para pago en banco.")
+                st.divider()
+
+                if count_nuevos > 0:
+                    st.error(f"🚨 **ATENCIÓN - SE DETECTARON {count_nuevos} PERSONAS NUEVAS**")
+                    colN1, colN2, colN3 = st.columns(3)
+                    colN1.download_button("1️⃣ 📥 Listado Excel (Para Don José)", data=datos_masiva['excel_nuevos'], file_name="Listado_Nuevos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                    colN2.download_button("2️⃣ 📥 Cuentas de Cobro (Solo Nuevos)", data=datos_masiva['pdf_ct_nuevos'], file_name="Cuentas_Cobro_Nuevos.pdf", mime="application/pdf", use_container_width=True)
+                    colN3.download_button("3️⃣ 📥 Docs Equivalentes (Solo Nuevos)", data=datos_masiva['zip_eq_nuevos'], file_name="Docs_Equivalentes_Nuevos.zip", mime="application/zip", use_container_width=True)
+                    st.divider()
+                
+                if count_ceros > 0:
+                    st.warning(f"⚠️ **SE DETECTARON {count_ceros} SALDOS EN CERO O NEGATIVOS**\n* {datos_masiva['nombres_ceros']}")
+                    colC1, colC2 = st.columns(2)
+                    colC1.download_button("1️⃣ 📥 Cuentas de Cobro (Saldos Cero)", data=datos_masiva['pdf_ct_ceros'], file_name="Cuentas_Cobro_Ceros.pdf", mime="application/pdf", use_container_width=True)
+                    colC2.download_button("2️⃣ 📥 Docs Equivalentes (Saldos Cero)", data=datos_masiva['zip_eq_ceros'], file_name="Docs_Equivalentes_Ceros.zip", mime="application/zip", use_container_width=True)
+                    st.divider()
+
+                st.markdown(f"### 📥 Soportes Contables Aprobados (Los {count_banco} del Banco)")
+                colD1, colD2, colD3 = st.columns(3)
+                colD1.download_button(label="1️⃣ Soportes: Cuentas de Cobro (.ZIP)", data=datos_masiva['zip_cuentas_banco'], file_name=f"Cuentas_Cobro_Aprobadas_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip", mime="application/zip", use_container_width=True, disabled=(count_banco == 0))
+                colD2.download_button(label="2️⃣ Soportes: Docs. Equivalentes (.ZIP)", data=datos_masiva['zip_eq_banco'], file_name=f"Docs_Equivalentes_Aprobados_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.zip", mime="application/zip", use_container_width=True, disabled=(count_banco == 0))
+                colD3.download_button(label="3️⃣ Archivo Excel PAB Banco (.XLSX)", data=datos_masiva['archivo_pab_bytes'], file_name=f"FORMATOPAB_{corte_seleccionado.replace(' ', '_').replace('/', '-')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, disabled=(count_banco == 0))
 
 # ==============================================================================
 # PESTAÑA 2: PANEL DE INFORMES GERENCIALES CON GRÁFICOS Y TABLAS 
