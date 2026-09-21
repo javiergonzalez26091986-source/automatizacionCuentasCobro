@@ -100,7 +100,7 @@ CODIGOS_BANCOS = {
     "BANCOLOMBIA": "1007", 
     "CITIBANK": "1009", 
     "BANCO GNB SUDAMERIS": "1012", 
-    "BBVA COLOMBIA": "1013", 
+    "BBVA": "1013", 
     "ITAU": "1014", 
     "DAVIbank S.A": "1019", 
     "BANCO DE OCCIDENTE": "1023", 
