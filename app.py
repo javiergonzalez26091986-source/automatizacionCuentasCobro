@@ -914,10 +914,11 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
         cedula_conductor = str(row.get('CÉDULA', row.get('CEDULA', ''))).strip()
         horas = obtener_horas(row)
 
-        porcentaje_retefuente = 0.01
+        # Si el tipo de documento del titular es NIT, no se cobra retefuente
+        porcentaje_retefuente = 0.0 if tipo_doc_pab == 'NIT' else 0.01
         porcentaje_ica = 0.01 if ciudad == 'CALI' else 0.0
         tasa_total_impuestos = porcentaje_retefuente + porcentaje_ica
-
+        
         fuera_perimetro_neto = 0.0
         
         if not df_fuera.empty and nombre_conductor != "" and nombre_conductor not in conductores_procesados_fpu:
