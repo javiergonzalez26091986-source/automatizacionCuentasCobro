@@ -326,7 +326,9 @@ def obtener_horas(row):
     for col in ['HORAS', 'CANTIDAD DE HORAS', 'CANTIDAD HORAS', 'TOTAL HORAS', 'CANTIDAD', 'NUMERO DE HORAS']:
         if col in row.index:
             try:
-                val = float(row[col])
+                # Reemplaza coma por punto para que Python entienda los decimales
+                val_str = str(row[col]).replace(',', '.')
+                val = float(val_str)
                 if not pd.isna(val):
                     if val >= 40000:
                         fecha_erronea = datetime(1899, 12, 30) + timedelta(days=int(val))
