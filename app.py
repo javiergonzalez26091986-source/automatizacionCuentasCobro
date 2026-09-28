@@ -1710,7 +1710,8 @@ with tab_rentabilidad:
     col_total_pagar = obtener_nombre_columna(df_pagos_base, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
     col_ced_conductor = obtener_nombre_columna(df_pagos_base, ['CÉDULA', 'CEDULA', 'C.C.', 'CC'])
     col_nombre_conductor = obtener_nombre_columna(df_pagos_base, ['CONDUCTOR', 'NOMBRES', 'NOMBRE'])
-    col_cliente_pagos = obtener_nombre_columna(df_pagos_base, ['CLIENTE', 'EMPRESA', 'PUNTO DE VENTA'])
+    # Se añade mayor robustez buscando en más posibles columnas del excel original de pagos
+    col_cliente_pagos = obtener_nombre_columna(df_pagos_base, ['CLIENTE', 'EMPRESA', 'PUNTO DE VENTA', 'OPERACIÓN', 'OPERACION', 'PROYECTO'])
     
     df_pagos_reales_ltsa = pd.DataFrame(columns=['_cedula_clean', 'VALOR_PAGADO_NETO', 'NOMBRE_EMPLEADO'])
     total_nomina_ltsa = 0
@@ -1720,16 +1721,42 @@ with tab_rentabilidad:
         df_pagos_base['_valor_pagar_num'] = df_pagos_base[col_total_pagar].apply(limpiar_dinero)
         df_pagos_base['_cedula_clean'] = df_pagos_base[col_ced_conductor].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         
+        # 1. Extraemos las cédulas de ambos validadores para usarlas como soporte cruzado.
+        cedulas_pollos_val = []
+        if not df_rent_pollos.empty:
+            col_ced_p = obtener_nombre_columna(df_rent_pollos, ['CÉDULA', 'CEDULA', 'CC'])
+            if col_ced_p:
+                cedulas_pollos_val = df_rent_pollos[col_ced_p].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip().unique().tolist()
+
+        cedulas_ltsa_val = []
+        if not df_rent_hist.empty:
+            col_ced_l = obtener_nombre_columna(df_rent_hist, ['CÉDULA', 'CEDULA', 'CC'])
+            if col_ced_l:
+                cedulas_ltsa_val = df_rent_hist[col_ced_l].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip().unique().tolist()
+
         if col_cliente_pagos:
             clientes_str = df_pagos_base[col_cliente_pagos].astype(str).str.upper()
-            mask_ltsa = clientes_str.str.contains('EXITO|ÉXITO|LTSA|LOGISTICA', na=False, regex=True)
-            mask_pollos = clientes_str.str.contains('POLLOS|PANADERIA|PANADERÍA|LECHONAS', na=False, regex=True)
             
-            df_base_ltsa = df_pagos_base[mask_ltsa]
-            df_base_pollos = df_pagos_base[mask_pollos]
+            # Incorporamos la palabra 'INDUSTRIA' que es como están saliendo los de pollos
+            mask_pollos = clientes_str.str.contains('POLLOS|PANADERIA|PANADERÍA|LECHONAS|INDUSTRIA', na=False, regex=True)
+            # Excluimos de LTSA expresamente a personal de otras empresas externas como Bolívar
+            mask_otras = clientes_str.str.contains('BOLIVAR|CONSTRUCTORA|OTRAS', na=False, regex=True)
+            
+            # Filtro LTSA = Que NO sea pollos y que NO sea externos (constructora)
+            mask_ltsa_explicita = clientes_str.str.contains('EXITO|ÉXITO|LTSA|LOGISTICA|CARULLA|SURTIMAX', na=False, regex=True)
+            mask_ltsa = (mask_ltsa_explicita | (~mask_pollos & ~mask_otras)) & ~mask_otras & ~mask_pollos
+            
+            mask_ced_pollos = df_pagos_base['_cedula_clean'].isin(cedulas_pollos_val)
+            
+            # Asignaciones definitivas (asegurándonos de no cruzar)
+            df_base_pollos = df_pagos_base[mask_pollos | mask_ced_pollos]
+            df_base_ltsa = df_pagos_base[mask_ltsa & ~mask_ced_pollos]
+            
         else:
-            df_base_ltsa = df_pagos_base
-            df_base_pollos = df_pagos_base
+            # Si en la base de pagos definitivamente no hay cómo saber la empresa, nos basamos 100% en si la cédula aparece en Pollos
+            mask_ced_pollos = df_pagos_base['_cedula_clean'].isin(cedulas_pollos_val)
+            df_base_pollos = df_pagos_base[mask_ced_pollos]
+            df_base_ltsa = df_pagos_base[~mask_ced_pollos]
 
         if not df_base_ltsa.empty:
             df_agg_ltsa = df_base_ltsa.groupby('_cedula_clean').agg(
