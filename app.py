@@ -5,6 +5,7 @@ import os
 import re
 import math
 import pandas as pd
+import unicodedata
 from datetime import datetime, timezone, timedelta
 from fpdf import FPDF
 import openpyxl
@@ -187,6 +188,17 @@ def extraer_df_desde_excel(archivo, sheet_buscada=None):
     df = pd.read_excel(archivo, sheet_name=hoja_objetivo, skiprows=fila_header)
     df.columns = df.columns.astype(str).str.strip().str.upper()
     
+    col_id = None
+    for col in df.columns:
+        if any(alias in col for alias in ['CÉDULA', 'CEDULA', 'CC', 'IDENTIFICACION', 'IDENTIFICACIÓN']):
+            col_id = col
+            break
+            
+    if col_id:
+        df = df.dropna(subset=[col_id])
+        df = df[~df[col_id].astype(str).str.upper().str.contains('TOTAL')]
+        df = df[df[col_id].astype(str).str.strip() != '']
+        
     return df
 
 def preparar_df_para_sheets(df_raw, cols_esperadas, periodo=""):
@@ -264,6 +276,13 @@ def limpiar_dinero(val):
 def limpiar_texto(txt):
     if pd.isna(txt): return ""
     return re.sub(r'\s+', ' ', str(txt).upper().strip())
+
+# Nueva función para quitar tildes y normalizar textos
+def remover_tildes(texto):
+    if pd.isna(texto): return ""
+    s = str(texto).upper()
+    s = unicodedata.normalize('NFD', s).encode('ascii', 'ignore').decode("utf-8")
+    return re.sub(r'\s+', ' ', s).strip()
 
 def obtener_horas(row):
     for col in ['HORAS', 'CANTIDAD DE HORAS', 'CANTIDAD HORAS', 'TOTAL HORAS', 'CANTIDAD', 'NUMERO DE HORAS']:
@@ -969,6 +988,15 @@ def calcular_valores_agrupados(grupo_df, df_fuera, corte_seleccionado, col_prest
     }
 
 # ==============================================================================
+# FUNCIÓN NORMALIZADORA PARA EVITAR ERRORES DE TILDES EN POLLOS
+# ==============================================================================
+def remove_accents(input_str):
+    if pd.isna(input_str): return ""
+    s = str(input_str).upper()
+    s = unicodedata.normalize('NFD', s).encode('ascii', 'ignore').decode("utf-8")
+    return re.sub(r'\s+', ' ', s).strip()
+
+# ==============================================================================
 # INTERFAZ DE USUARIO Y MAIN
 # ==============================================================================
 if 'key_ltsa' not in st.session_state: st.session_state['key_ltsa'] = 0
@@ -1525,7 +1553,6 @@ with tab_rentabilidad:
         df_pagos_base['_valor_pagar_num'] = df_pagos_base[col_total_pagar].apply(limpiar_dinero)
         df_pagos_base['_cedula_clean'] = df_pagos_base[col_ced_conductor].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         
-        # Identificar si es un NIT usando EXCLUSIVAMENTE la columna del Sheets o su longitud como salvavidas
         def check_is_nit(row):
             t_doc = str(row.get(col_tipo_doc_pagos, '')).upper().strip() if col_tipo_doc_pagos else ''
             if 'NIT' in t_doc: return True
@@ -1536,7 +1563,6 @@ with tab_rentabilidad:
             
         df_pagos_base['IS_NIT'] = df_pagos_base.apply(check_is_nit, axis=1)
 
-        # Agrupar Pagos de la sábana de Google Sheets
         df_agg_pagos = df_pagos_base.groupby('_cedula_clean').agg(
             NOMBRE_EMPLEADO=(col_nombre_conductor if col_nombre_conductor else col_prestador, 'first'),
             VALOR_PAGADO_NETO=('_valor_pagar_num', 'sum'),
@@ -1577,7 +1603,6 @@ with tab_rentabilidad:
                     col_operacion = df_raw_global.columns[2]
                 
                 if col_operacion:
-                    # Incluimos explícitamente LECHONAS e INDUSTRIA
                     mask_pollos_val = df_raw_global[col_operacion].astype(str).str.upper().str.contains('POLLOS|PANADERIA|PANADERÍA|LECHONAS|INDUSTRIA', na=False, regex=True)
                     df_raw_pollos = df_raw_global[mask_pollos_val]
                     df_raw_ltsa = df_raw_global[~mask_pollos_val]
@@ -1592,7 +1617,6 @@ with tab_rentabilidad:
                     res_ltsa = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_HISTORICA", bulk_ltsa, clear_first=False, replace_period=param_replace)
                     res_pollos = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_POLLOS_PANADERIA", bulk_pollos, clear_first=False, replace_period=param_replace)
                     
-                    # Intentar subir la pestaña de pagos de pollos desde el mismo archivo global
                     msg_pago = ""
                     try:
                         df_raw_pago = extraer_df_desde_excel(file_global, 'PAGO POLLOS-PANADERIA') 
@@ -1636,10 +1660,10 @@ with tab_rentabilidad:
             def procesar_rentabilidad_ltsa(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, corte_a_evaluar, costo_label="Costo Nómina Real (Pagos SERGEM)"):
                 try:
                     col_periodo = obtener_nombre_columna(df_cobro_raw, ['PERIODO', 'CORTE'])
-                    if corte_a_evaluar == "GLOBAL":
+                    if corte_evaluado_str == "GLOBAL":
                         df_cobro = df_cobro_raw.copy()
                     elif col_periodo:
-                        df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_a_evaluar).strip().upper()].copy()
+                        df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_evaluado_str).strip().upper()].copy()
                     else:
                         df_cobro = df_cobro_raw.copy()
 
@@ -1683,6 +1707,8 @@ with tab_rentabilidad:
                         
                     df_cruce['NOMBRE_EMPLEADO'] = df_cruce.get('NOMBRE_EMPLEADO', pd.Series(['S/N']*len(df_cruce))).fillna("S/N")
                     
+                    st.success(f"✅ Mostrando los registros puros de LTSA cruzados con Pagos.")
+                    
                     # ---------------------------------------------------------------------
                     # FILTRO INTERACTIVO PARA OCULTAR CEROS Y RECALCULAR TOTALES
                     # ---------------------------------------------------------------------
@@ -1693,9 +1719,7 @@ with tab_rentabilidad:
                     
                     if "Ocultar" in mostrar_ceros:
                         df_cruce = df_cruce[df_cruce['VALOR_PAGADO_NETO'] > 0]
-                        st.success(f"✅ Filtro aplicado: Mostrando {len(df_cruce)} Colaboradores tercerizados (con pagos generados).")
-                    else:
-                        st.info(f"✅ Mostrando los {len(df_cruce)} registros totales de LTSA en este corte.")
+                        st.info(f"Filtro aplicado: Mostrando {len(df_cruce)} Colaboradores tercerizados (con pagos generados).")
                     
                     def calc_retencion_ltsa(row):
                         if row.get('IS_NIT') == True: return 0.0
@@ -1768,7 +1792,7 @@ with tab_rentabilidad:
                     tot_utilidad = float(df_cruce['UTILIDAD_REAL_NETA'].sum())
                     
                     r1.metric("Facturación Cliente", f"${tot_cobrado:,.0f}")
-                    r2.metric("Costo Nómina (Pago)", f"${tot_pagado:,.0f}")
+                    r2.metric(costo_label, f"${tot_pagado:,.0f}")
                     r3.metric("Retención Asumida (1%)", f"${tot_rete:,.0f}")
                     r4.metric("UTILIDAD NETA", f"${tot_utilidad:,.0f}")
 
@@ -1807,10 +1831,10 @@ with tab_rentabilidad:
 
                 df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
                 
-                # CRUCE EXACTO POR OPERACION (Omitiendo la Cédula para solucionar el problema del audio)
+                # CRUCE DIRECTO POR NOMBRE DE OPERACIÓN NORMALIZADO (Elimina problemas de tildes o cédulas erradas)
                 def create_link_key(row):
-                    op = str(row[col_op]).upper()
-                    orig = str(row[col_origen]).upper()
+                    op = remover_tildes(row[col_op])
+                    orig = remover_tildes(row[col_origen])
                     if 'LECHONAS' in op: return 'LECHONAS'
                     elif 'PANADERIA' in op: return 'PANADERIA'
                     else: return orig
@@ -1827,9 +1851,12 @@ with tab_rentabilidad:
                     
                     if col_op_pago and col_val_pago:
                         df_pagos_reales_p[col_val_pago] = pd.to_numeric(df_pagos_reales_p[col_val_pago], errors='coerce').fillna(0)
-                        pago_agrupado = df_pagos_reales_p.groupby(col_op_pago)[col_val_pago].sum().reset_index()
-                        pago_agrupado.rename(columns={col_op_pago: 'LINK_KEY', col_val_pago: 'VALOR_PAGADO_NETO_TOTAL'}, inplace=True)
-                        pago_agrupado['LINK_KEY'] = pago_agrupado['LINK_KEY'].astype(str).str.upper().str.strip()
+                        
+                        # Normalizamos la columna del excel de pagos para que cruce con o sin tilde
+                        df_pagos_reales_p['LINK_KEY'] = df_pagos_reales_p[col_op_pago].apply(remover_tildes)
+                        
+                        pago_agrupado = df_pagos_reales_p.groupby('LINK_KEY')[col_val_pago].sum().reset_index()
+                        pago_agrupado.rename(columns={col_val_pago: 'VALOR_PAGADO_NETO_TOTAL'}, inplace=True)
                         
                         df_cobro = pd.merge(df_cobro, pago_agrupado, on='LINK_KEY', how='left')
                     else:
@@ -1837,6 +1864,7 @@ with tab_rentabilidad:
                 else:
                     df_cobro['VALOR_PAGADO_NETO_TOTAL'] = 0
 
+                # Lógica matemática exacta de tu clienta (Power Query): Distribución proporcional a lo cobrado o asume 69.8%
                 def calcular_costo_pollo_proporcional(row):
                     if pd.notna(row.get('VALOR_PAGADO_NETO_TOTAL')) and row['VALOR_PAGADO_NETO_TOTAL'] > 0 and pd.notna(row.get('TOTAL_COBRADO_KEY')) and row['TOTAL_COBRADO_KEY'] > 0:
                         return (row[col_total_cobro] / row['TOTAL_COBRADO_KEY']) * row['VALOR_PAGADO_NETO_TOTAL']
@@ -1845,13 +1873,13 @@ with tab_rentabilidad:
                         
                 df_cobro['COSTO_ESTIMADO'] = df_cobro.apply(calcular_costo_pollo_proporcional, axis=1)
 
-                # Agrupar la vista final por ORIGEN y OPERACIÓN SIN retenciones
+                # Agrupación final por Origen y Operación. SIN cálculos de retención.
                 df_cruce = df_cobro.groupby([col_origen, col_op]).agg(
                     TOTAL_COBRADO=(col_total_cobro, 'sum'),
                     VALOR_PAGADO_NETO=('COSTO_ESTIMADO', 'sum')
                 ).reset_index()
                 
-                # Ocultar todos los orígenes que no sean puramente "Industria" o cuya operación sea Panadería/Lechonas
+                # Se eliminan de la vista los Exitos y Carullas que no digan Panaderia
                 mask_visual = df_cruce[col_origen].str.upper().str.contains('INDUSTRIA', na=False) | df_cruce[col_op].str.upper().str.contains('PANADERIA|LECHONAS', na=False)
                 df_cruce = df_cruce[mask_visual]
 
@@ -1860,7 +1888,7 @@ with tab_rentabilidad:
 
                 df_cruce = df_cruce.sort_values([col_origen, 'UTILIDAD_NETA'], ascending=[True, False])
                 
-                st.success(f"✅ Mostrando la rentabilidad consolidada y desglosada por **{len(df_cruce)}** ramas de Industrias.")
+                st.success(f"✅ Mostrando la rentabilidad consolidada y desglosada por **{len(df_cruce)}** ramas operativas.")
                 
                 format_dict = {'TOTAL_COBRADO': '${:,.0f}', 'VALOR_PAGADO_NETO': '${:,.0f}', 'UTILIDAD_NETA': '${:,.0f}', 'MARGEN_REAL': '{:.1%}'}
                 styler = df_cruce.style.format(format_dict)
