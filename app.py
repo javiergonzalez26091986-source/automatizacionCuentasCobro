@@ -1523,40 +1523,37 @@ with tab_rentabilidad:
         corte_evaluado_str = corte_a_evaluar
         df_pagos_base = df_pagos_completo[df_pagos_completo['CORTE'] == corte_a_evaluar].copy()
 
-    # Preparar el dataframe de pagos completo 
+    # Preparamos la base de pagos global buscando exactamente el TIPO DE DOCUMENTO para lo del NIT
     col_total_pagar = obtener_nombre_columna(df_pagos_base, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
     col_ced_conductor = obtener_nombre_columna(df_pagos_base, ['CÉDULA', 'CEDULA', 'C.C.', 'CC'])
     col_nombre_conductor = obtener_nombre_columna(df_pagos_base, ['CONDUCTOR', 'NOMBRES', 'NOMBRE'])
-    
+    col_tipo_doc_pagos = obtener_nombre_columna(df_pagos_base, ['TIPO DE DOCUMENTO', 'TIPO DOCUMENTO'])
+
     df_pagos_reales_ltsa = pd.DataFrame(columns=['_cedula_clean', 'VALOR_PAGADO_NETO', 'NOMBRE_EMPLEADO', 'IS_NIT'])
-    df_pagos_reales_pollos = pd.DataFrame(columns=['_cedula_clean', 'VALOR_PAGADO_NETO', 'NOMBRE_EMPLEADO', 'IS_NIT'])
-    
+    total_nomina_ltsa = 0
+
     if col_total_pagar and col_ced_conductor and not df_pagos_base.empty:
         df_pagos_base['_valor_pagar_num'] = df_pagos_base[col_total_pagar].apply(limpiar_dinero)
         df_pagos_base['_cedula_clean'] = df_pagos_base[col_ced_conductor].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         
-        # Identificar si es un NIT (Para la lógica de la Retención Asumida)
+        # Identificar si es un NIT (Para la lógica de la Retención Asumida del 1%)
         def check_is_nit(row):
-            ced = str(row['_cedula_clean'])
-            if len(ced) == 9 and ced.startswith(('8', '9')): return True
-            t_doc = str(row.get('TIPO DE DOCUMENTO', row.get('TIPO DOCUMENTO', ''))).upper()
+            t_doc = str(row.get(col_tipo_doc_pagos, '')).upper() if col_tipo_doc_pagos else ''
             if 'NIT' in t_doc: return True
             return False
             
         df_pagos_base['IS_NIT'] = df_pagos_base.apply(check_is_nit, axis=1)
 
-        # Agrupar Pagos sin filtros ciegos
+        # Agrupar Pagos de la sábana de Google Sheets
         df_agg_pagos = df_pagos_base.groupby('_cedula_clean').agg(
-            NOMBRE_EMPLEADO=(col_nombre_conductor if col_nombre_conductor else col_prestador, 'first'),
+            NOMBRE_EMPLEADO=(col_nombre_conductor if col_nombre_conductor else col_ced_conductor, 'first'),
             VALOR_PAGADO_NETO=('_valor_pagar_num', 'sum'),
             IS_NIT=('IS_NIT', 'first')
         ).reset_index()
         
         df_pagos_todos = df_agg_pagos[df_agg_pagos['_cedula_clean'] != '']
-        
-        # Estas bases puras se enviarán al LEFT JOIN que se encarga de separar el ruido externo
         df_pagos_reales_ltsa = df_pagos_todos.copy()
-        df_pagos_reales_pollos = df_pagos_todos.copy()
+        total_nomina_ltsa = df_pagos_reales_ltsa['VALOR_PAGADO_NETO'].sum()
 
     # -------------------------------------------------------------------------
     # 3. CARGADOR ÚNICO DE ARCHIVO Y SEGMENTACIÓN INTELIGENTE
@@ -1644,13 +1641,13 @@ with tab_rentabilidad:
             st.markdown(f"#### 📊 2. Tablero de Resultados LTSA (Corte: {corte_evaluado_str})")
             
         if not df_rent_hist.empty:
-            def procesar_rentabilidad_ltsa(df_cobro_raw, titulo_modulo, df_pagos_reales_rent):
+            def procesar_rentabilidad_ltsa(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, corte_a_evaluar, costo_label="Costo Nómina Real (Pagos SERGEM)"):
                 try:
                     col_periodo = obtener_nombre_columna(df_cobro_raw, ['PERIODO', 'CORTE'])
-                    if corte_evaluado_str == "GLOBAL":
+                    if corte_a_evaluar == "GLOBAL":
                         df_cobro = df_cobro_raw.copy()
                     elif col_periodo:
-                        df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_evaluado_str).strip().upper()].copy()
+                        df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_a_evaluar).strip().upper()].copy()
                     else:
                         df_cobro = df_cobro_raw.copy()
 
@@ -1778,7 +1775,7 @@ with tab_rentabilidad:
                 except Exception as e:
                     st.error(f"Error calculando la rentabilidad: {e}")
 
-            procesar_rentabilidad_ltsa(df_rent_hist, "LTSA", df_pagos_reales_ltsa)
+            procesar_rentabilidad_ltsa(df_rent_hist, "LTSA", df_pagos_reales_ltsa, corte_evaluado_str)
         else:
             st.info("No hay datos en la base de datos para mostrar. Sube el validador en el paso 1.")
             
@@ -1800,6 +1797,7 @@ with tab_rentabilidad:
 
                 if df_cobro.empty: return
 
+                # FILTRO ESTRICTO OPERACIÓN
                 col_op = obtener_nombre_columna(df_cobro, ['OPERACIÓN', 'OPERACION', 'LINEA'])
                 if col_op:
                     mask_pollos_validos = df_cobro[col_op].astype(str).str.upper().str.contains('POLLOS|PANADERIA|PANADERÍA|LECHONAS|INDUSTRIA', na=False, regex=True)
@@ -1819,6 +1817,8 @@ with tab_rentabilidad:
 
                 df_cobro['_cedula_clean'] = df_cobro[col_ced_cobro].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
                 df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
+                
+                # Estandarizamos los textos para agrupar mejor
                 df_cobro[col_origen] = df_cobro[col_origen].astype(str).str.upper().str.strip()
                 df_cobro[col_op] = df_cobro[col_op].astype(str).str.upper().str.strip()
                 
@@ -1838,7 +1838,7 @@ with tab_rentabilidad:
                     df_cobro['VALOR_PAGADO_NETO'] = 0
                     df_cobro['IS_NIT'] = False
 
-                # 3. Distribución del costo idéntica a Power Query 
+                # 3. Lógica matemática exacta del Power Query para distribuir costos o asumir 69.8% cuando el pago sea 0
                 def calcular_costo_pollo(row):
                     if pd.notna(row.get('VALOR_PAGADO_NETO')) and pd.notna(row.get('TOTAL_COBRADO_EMPLEADO')) and row['TOTAL_COBRADO_EMPLEADO'] > 0 and row['VALOR_PAGADO_NETO'] > 0:
                         return (row[col_total_cobro] / row['TOTAL_COBRADO_EMPLEADO']) * row['VALOR_PAGADO_NETO']
