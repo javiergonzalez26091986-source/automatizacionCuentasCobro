@@ -128,7 +128,7 @@ def obtener_fecha_actual():
 def cargar_datos(url):
     try:
         req_url = f"{url}?t={int(datetime.now().timestamp())}"
-        response = requests.get(req_url, allow_redirects=True, timeout=15)
+        response = requests.get(req_url, allow_redirects=True, timeout=60)
         if response.status_code != 200:
             st.error(f"⚠️ Error de respuesta de Google Apps Script: Código {response.status_code}")
             return None
