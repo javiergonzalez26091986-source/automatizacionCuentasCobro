@@ -1523,7 +1523,7 @@ with tab_rentabilidad:
         corte_evaluado_str = corte_a_evaluar
         df_pagos_base = df_pagos_completo[df_pagos_completo['CORTE'] == corte_a_evaluar].copy()
 
-    # Preparamos la base de pagos global buscando exactamente el TIPO DE DOCUMENTO para lo del NIT
+    # Preparar el dataframe de pagos completo buscando el TIPO DE DOCUMENTO explícito en el Google Sheets
     col_total_pagar = obtener_nombre_columna(df_pagos_base, ['TOTAL A PAGAR', 'TOTAL_A_PAGAR', 'NETO'])
     col_ced_conductor = obtener_nombre_columna(df_pagos_base, ['CÉDULA', 'CEDULA', 'C.C.', 'CC'])
     col_nombre_conductor = obtener_nombre_columna(df_pagos_base, ['CONDUCTOR', 'NOMBRES', 'NOMBRE'])
@@ -1536,10 +1536,13 @@ with tab_rentabilidad:
         df_pagos_base['_valor_pagar_num'] = df_pagos_base[col_total_pagar].apply(limpiar_dinero)
         df_pagos_base['_cedula_clean'] = df_pagos_base[col_ced_conductor].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         
-        # Identificar si es un NIT (Para la lógica de la Retención Asumida del 1%)
+        # Identificar si es un NIT usando EXCLUSIVAMENTE la columna del Sheets o su longitud como salvavidas
         def check_is_nit(row):
-            t_doc = str(row.get(col_tipo_doc_pagos, '')).upper() if col_tipo_doc_pagos else ''
+            t_doc = str(row.get(col_tipo_doc_pagos, '')).upper().strip() if col_tipo_doc_pagos else ''
             if 'NIT' in t_doc: return True
+            
+            ced = str(row['_cedula_clean'])
+            if len(ced) == 9 and ced.startswith(('8', '9')): return True
             return False
             
         df_pagos_base['IS_NIT'] = df_pagos_base.apply(check_is_nit, axis=1)
@@ -1641,13 +1644,13 @@ with tab_rentabilidad:
             st.markdown(f"#### 📊 2. Tablero de Resultados LTSA (Corte: {corte_evaluado_str})")
             
         if not df_rent_hist.empty:
-            def procesar_rentabilidad_ltsa(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, corte_a_evaluar, costo_label="Costo Nómina Real (Pagos SERGEM)"):
+            def procesar_rentabilidad_ltsa(df_cobro_raw, titulo_modulo, df_pagos_reales_rent, corte_a_evaluar):
                 try:
                     col_periodo = obtener_nombre_columna(df_cobro_raw, ['PERIODO', 'CORTE'])
-                    if corte_a_evaluar == "GLOBAL":
+                    if corte_evaluado_str == "GLOBAL":
                         df_cobro = df_cobro_raw.copy()
                     elif col_periodo:
-                        df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_a_evaluar).strip().upper()].copy()
+                        df_cobro = df_cobro_raw[df_cobro_raw[col_periodo].astype(str).str.strip().str.upper() == str(corte_evaluado_str).strip().upper()].copy()
                     else:
                         df_cobro = df_cobro_raw.copy()
 
@@ -1693,6 +1696,20 @@ with tab_rentabilidad:
                     df_cruce['NOMBRE_EMPLEADO'] = df_cruce.get('NOMBRE_EMPLEADO', pd.Series(['S/N']*len(df_cruce))).fillna("S/N")
                     
                     # ---------------------------------------------------------------------
+                    # FILTRO INTERACTIVO PARA OCULTAR CEROS Y RECALCULAR TOTALES
+                    # ---------------------------------------------------------------------
+                    st.success(f"✅ Mostrando los registros puros de LTSA cruzados con Pagos.")
+                    
+                    mostrar_ceros = st.radio("🔍 Filtro de Auditoría y Totales Reales:", 
+                                            ["Mostrar todo (Incluir Terceros con pago en $0)", 
+                                             "Ocultar pagos en $0 (Ver utilidades netas reales)"], 
+                                            horizontal=True)
+                    
+                    if "Ocultar" in mostrar_ceros:
+                        df_cruce = df_cruce[df_cruce['VALOR_PAGADO_NETO'] > 0]
+                        st.info(f"Filtro aplicado: Mostrando {len(df_cruce)} Colaboradores tercerizados (con pagos generados).")
+                    
+                    # ---------------------------------------------------------------------
                     # CÁLCULO DE RETENCIÓN ASUMIDA EXACTA (LTSA)
                     # ---------------------------------------------------------------------
                     def calc_retencion_ltsa(row):
@@ -1716,8 +1733,6 @@ with tab_rentabilidad:
                         df_cruce['CATEGORIA_VEHICULO'] = df_cruce.get(col_vehiculo).apply(limpiar_vehiculo)
                     else:
                         df_cruce['CATEGORIA_VEHICULO'] = "NO DEFINIDO"
-                    
-                    st.success(f"✅ Mostrando los **{len(df_cruce)}** registros puros de LTSA en este corte.")
                     
                     tab_emp, tab_veh, tab_alm = st.tabs(["👥 Rentabilidad por Empleado", "🛵 Rentabilidad por Vehículo", "🏢 Rentabilidad por Almacén"])
                     
@@ -1759,7 +1774,7 @@ with tab_rentabilidad:
                             st.info("No se encontró columna de almacén en este validador.")
                     
                     st.divider()
-                    st.markdown(f"### 💰 Gran Total ({titulo_modulo})")
+                    st.markdown(f"### 💰 Gran Total (LTSA)")
                     
                     r1, r2, r3, r4 = st.columns(4)
                     tot_cobrado = float(df_cruce['TOTAL_COBRADO_LTSA'].sum())
@@ -1829,14 +1844,10 @@ with tab_rentabilidad:
                 
                 # 2. Agregar los pagos reales (Pestaña PAGO)
                 if not df_pagos_reales.empty and '_cedula_clean' in df_pagos_reales.columns:
-                    df_pagos_agrupados = df_pagos_reales.groupby('_cedula_clean').agg(
-                        VALOR_PAGADO_NETO=('VALOR_PAGADO_NETO', 'sum'),
-                        IS_NIT=('IS_NIT', 'first')
-                    ).reset_index()
+                    df_pagos_agrupados = df_pagos_reales.groupby('_cedula_clean')['VALOR_PAGADO_NETO'].sum().reset_index()
                     df_cobro = pd.merge(df_cobro, df_pagos_agrupados, on='_cedula_clean', how='left')
                 else:
                     df_cobro['VALOR_PAGADO_NETO'] = 0
-                    df_cobro['IS_NIT'] = False
 
                 # 3. Lógica matemática exacta del Power Query para distribuir costos o asumir 69.8% cuando el pago sea 0
                 def calcular_costo_pollo(row):
@@ -1847,50 +1858,38 @@ with tab_rentabilidad:
                         
                 df_cobro['COSTO_ESTIMADO'] = df_cobro.apply(calcular_costo_pollo, axis=1)
 
-                # ---------------------------------------------------------------------
-                # CÁLCULO DE RETENCIÓN ASUMIDA EXACTA (POLLOS)
-                # ---------------------------------------------------------------------
-                def calc_retencion_pollo(row):
-                    if row.get('IS_NIT') == True: return 0.0
-                    return round((row['COSTO_ESTIMADO'] / 0.99) * 0.01) if row['COSTO_ESTIMADO'] > 0 else 0.0
-                
-                df_cobro['RETENCION_ASUMIDA'] = df_cobro.apply(calc_retencion_pollo, axis=1)
-
                 # 4. Agrupar la vista final por ORIGEN y OPERACIÓN
                 df_cruce = df_cobro.groupby([col_origen, col_op]).agg(
                     TOTAL_COBRADO=(col_total_cobro, 'sum'),
-                    VALOR_PAGADO_NETO=('COSTO_ESTIMADO', 'sum'),
-                    RETENCION_ASUMIDA=('RETENCION_ASUMIDA', 'sum')
+                    VALOR_PAGADO_NETO=('COSTO_ESTIMADO', 'sum')
                 ).reset_index()
                 
                 # 5. Ocultar todos los orígenes que no sean Industrias puras
                 mask_solo_industrias = df_cruce[col_origen].astype(str).str.upper().str.contains('INDUSTRIA', na=False)
                 df_cruce = df_cruce[mask_solo_industrias]
 
-                df_cruce['UTILIDAD_ANTES_RETENCION'] = df_cruce['TOTAL_COBRADO'] - df_cruce['VALOR_PAGADO_NETO']
-                df_cruce['UTILIDAD_REAL_NETA'] = df_cruce['UTILIDAD_ANTES_RETENCION'] - df_cruce['RETENCION_ASUMIDA']
-                df_cruce['MARGEN_REAL'] = (df_cruce['UTILIDAD_REAL_NETA'] / df_cruce['TOTAL_COBRADO'].replace(0, 1)).fillna(0)
+                df_cruce['UTILIDAD_NETA'] = df_cruce['TOTAL_COBRADO'] - df_cruce['VALOR_PAGADO_NETO']
+                df_cruce['MARGEN_REAL'] = (df_cruce['UTILIDAD_NETA'] / df_cruce['TOTAL_COBRADO'].replace(0, 1)).fillna(0)
 
-                df_cruce = df_cruce.sort_values([col_origen, 'UTILIDAD_REAL_NETA'], ascending=[True, False])
+                df_cruce = df_cruce.sort_values([col_origen, 'UTILIDAD_NETA'], ascending=[True, False])
                 
                 st.success(f"✅ Mostrando la rentabilidad consolidada y desglosada por **{len(df_cruce)}** ramas de Industrias.")
                 
-                format_dict = {'TOTAL_COBRADO': '${:,.0f}', 'VALOR_PAGADO_NETO': '${:,.0f}', 'UTILIDAD_ANTES_RETENCION': '${:,.0f}', 'RETENCION_ASUMIDA': '${:,.0f}', 'UTILIDAD_REAL_NETA': '${:,.0f}', 'MARGEN_REAL': '{:.1%}'}
+                format_dict = {'TOTAL_COBRADO': '${:,.0f}', 'VALOR_PAGADO_NETO': '${:,.0f}', 'UTILIDAD_NETA': '${:,.0f}', 'MARGEN_REAL': '{:.1%}'}
                 styler = df_cruce.style.format(format_dict)
                 try:
-                    if hasattr(styler, 'map'): styler = styler.map(lambda x: 'color: #E3000F' if x < 0 else 'color: #15803d', subset=['UTILIDAD_REAL_NETA'])
-                    else: styler = styler.applymap(lambda x: 'color: #E3000F' if x < 0 else 'color: #15803d', subset=['UTILIDAD_REAL_NETA'])
+                    if hasattr(styler, 'map'): styler = styler.map(lambda x: 'color: #E3000F' if x < 0 else 'color: #15803d', subset=['UTILIDAD_NETA'])
+                    else: styler = styler.applymap(lambda x: 'color: #E3000F' if x < 0 else 'color: #15803d', subset=['UTILIDAD_NETA'])
                 except: pass
                 
                 st.dataframe(styler, hide_index=True, use_container_width=True)
 
                 st.divider()
                 st.markdown("### 💰 Gran Total (Pollos, Panadería y Lechonas)")
-                r1, r2, r3, r4 = st.columns(4)
+                r1, r2, r3 = st.columns(3)
                 r1.metric("Facturación Cliente", f"${df_cruce['TOTAL_COBRADO'].sum():,.0f}")
                 r2.metric("Costo Nómina Real (Distribuido)", f"${df_cruce['VALOR_PAGADO_NETO'].sum():,.0f}")
-                r3.metric("Retención Asumida (1%)", f"${df_cruce['RETENCION_ASUMIDA'].sum():,.0f}")
-                r4.metric("UTILIDAD NETA", f"${df_cruce['UTILIDAD_REAL_NETA'].sum():,.0f}")
+                r3.metric("UTILIDAD NETA", f"${df_cruce['UTILIDAD_NETA'].sum():,.0f}")
 
             # Obtenemos los pagos específicos de pollos de su propia base para enviarlos al motor
             if not df_rent_pollos_pago.empty:
