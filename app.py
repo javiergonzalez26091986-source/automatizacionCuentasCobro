@@ -158,24 +158,31 @@ def subir_bulk_a_sheets(url, sheet_name, bulk_data, clear_first=False, replace_p
     except Exception as e:
         return {"status": "error", "message": str(e) or "Error de conexión desconocido."}
 
-def extraer_df_desde_excel(archivo, sheet_buscada=None):
+def extraer_df_desde_excel(archivo, sheet_buscada=None, estricto=False):
     xls = pd.ExcelFile(archivo)
     hoja_objetivo = None
-    posibles = [sheet_buscada, 'REPORTE', 'COBRO', 'PAGO', 'PAGO POLLOS-PANADERIA', 'BASE', 'DATOS'] if sheet_buscada else ['REPORTE', 'COBRO', 'PAGO', 'BASE', 'DATOS']
     
-    for nombre in posibles:
-        if nombre and nombre in xls.sheet_names:
-            hoja_objetivo = nombre
-            break
-            
-    if not hoja_objetivo:
-        for sh in xls.sheet_names:
-            df_test = pd.read_excel(archivo, sheet_name=sh, nrows=15, header=None)
-            if df_test.astype(str).apply(lambda col: col.str.contains('CEDULA|CÉDULA|IDENTIFICACION|IDENTIFICACIÓN', case=False, na=False)).any().any():
-                hoja_objetivo = sh
+    if estricto and sheet_buscada:
+        if sheet_buscada in xls.sheet_names:
+            hoja_objetivo = sheet_buscada
+        else:
+            raise ValueError(f"La pestaña {sheet_buscada} no existe.")
+    else:
+        posibles = [sheet_buscada, 'REPORTE', 'COBRO', 'PAGO', 'PAGO POLLOS-PANADERIA', 'BASE', 'DATOS'] if sheet_buscada else ['REPORTE', 'COBRO', 'PAGO', 'BASE', 'DATOS']
+        
+        for nombre in posibles:
+            if nombre and nombre in xls.sheet_names:
+                hoja_objetivo = nombre
                 break
                 
-    if not hoja_objetivo: hoja_objetivo = xls.sheet_names[0]
+        if not hoja_objetivo:
+            for sh in xls.sheet_names:
+                df_test = pd.read_excel(archivo, sheet_name=sh, nrows=15, header=None)
+                if df_test.astype(str).apply(lambda col: col.str.contains('CEDULA|CÉDULA|IDENTIFICACION|IDENTIFICACIÓN', case=False, na=False)).any().any():
+                    hoja_objetivo = sh
+                    break
+                    
+        if not hoja_objetivo: hoja_objetivo = xls.sheet_names[0]
 
     df_temp = pd.read_excel(archivo, sheet_name=hoja_objetivo, nrows=15, header=None)
     fila_header = 0
@@ -814,7 +821,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera_completa, corte_seleccionado, 
     fpu_items_doc = []
     conductores_procesados_fpu = set()
     
-    # NUEVO: Filtramos los fueras de perímetro para que coincidan SÓLO con la quincena (corte) seleccionada
     df_fuera = df_fuera_completa.copy()
     if not df_fuera.empty:
         col_corte_fuera = obtener_nombre_columna(df_fuera, ['CORTE', 'PERIODO'])
@@ -981,12 +987,6 @@ def calcular_valores_agrupados(grupo_df, df_fuera_completa, corte_seleccionado, 
         'neto_pagar': suma_neto,
         'total_horas': suma_horas
     }
-
-def remover_tildes(texto):
-    if pd.isna(texto): return ""
-    s = str(texto).upper()
-    s = unicodedata.normalize('NFD', s).encode('ascii', 'ignore').decode("utf-8")
-    return re.sub(r'\s+', ' ', s).strip()
 
 # ==============================================================================
 # INTERFAZ DE USUARIO Y MAIN
@@ -1544,17 +1544,11 @@ with tab_rentabilidad:
         df_pagos_base['_valor_pagar_num'] = df_pagos_base[col_total_pagar].apply(limpiar_dinero)
         df_pagos_base['_cedula_clean'] = df_pagos_base[col_ced_conductor].astype(str).str.replace(r'\.0$', '', regex=True).str.replace(r'\D', '', regex=True).str.strip()
         
-        # Identificar si es un NIT (Para la lógica de la Retención Asumida)
         def check_is_nit(row):
-            # Condición 1: Que diga INVERSIONES SOLUCIONES... en la columna de quien cobra
             cobra = remover_tildes(row.get(col_quien_cobra, '')) if col_quien_cobra else ''
             if 'INVERSIONES SOLUCIONES' in cobra: return True
-            
-            # Condición 2: Que diga NIT en el tipo de documento
             t_doc = str(row.get(col_tipo_doc_pagos, '')).upper().strip() if col_tipo_doc_pagos else ''
             if 'NIT' in t_doc: return True
-            
-            # Condición 3: Por longitud de cédula (9 dígitos, típica de NIT colombiano)
             ced = str(row['_cedula_clean'])
             if len(ced) == 9 and ced.startswith(('8', '9')): return True
             return False
@@ -1570,7 +1564,6 @@ with tab_rentabilidad:
         df_pagos_todos = df_agg_pagos[df_agg_pagos['_cedula_clean'] != '']
         df_pagos_reales_ltsa = df_pagos_todos.copy()
 
-        # --- AJUSTE INTELIGENTE: Descontar de LTSA lo que se pagó por Panadería ---
         if not df_rent_pollos_pago.empty:
             col_per_pago_p = obtener_nombre_columna(df_rent_pollos_pago, ['PERIODO', 'CORTE'])
             col_op_pago_p = obtener_nombre_columna(df_rent_pollos_pago, ['OPERACIÓN', 'OPERACION'])
@@ -1585,24 +1578,20 @@ with tab_rentabilidad:
                 if not df_panaderia_pagos.empty:
                     df_panaderia_pagos['_val_desc'] = pd.to_numeric(df_panaderia_pagos[col_val_pago_p], errors='coerce').fillna(0)
                     
-                    # Como la cédula puede variar (ej. 14636120 vs 14969629), buscamos por nombre contenido
                     for _, pan_row in df_panaderia_pagos.iterrows():
                         val_descontar = pan_row['_val_desc']
                         if val_descontar <= 0: continue
                         
                         nombre_pan = remover_tildes(pan_row.get(col_emp_pago_p, '')).strip()
                         ced_pan = str(pan_row.get(col_ced_pago_p, '')).replace('.0', '').strip()
-                        
                         match_encontrado = False
                         
-                        # Intento 1: Por Cédula exacta
                         if ced_pan != "":
                             mask_ced = df_pagos_reales_ltsa['_cedula_clean'] == ced_pan
                             if mask_ced.any():
                                 df_pagos_reales_ltsa.loc[mask_ced, 'VALOR_PAGADO_NETO'] -= val_descontar
                                 match_encontrado = True
                         
-                        # Intento 2: Por Nombre (Si una parte del nombre coincide, ej. RIGOBERTO LO está en RIGOBERTO LOPEZ)
                         if not match_encontrado and len(nombre_pan) > 5:
                             for i, ltsa_row in df_pagos_reales_ltsa.iterrows():
                                 nombre_ltsa = remover_tildes(ltsa_row['NOMBRE_EMPLEADO']).strip()
@@ -1653,7 +1642,7 @@ with tab_rentabilidad:
                     
                     msg_pago = ""
                     try:
-                        df_raw_pago = extraer_df_desde_excel(file_global, 'PAGO POLLOS-PANADERIA') 
+                        df_raw_pago = extraer_df_desde_excel(file_global, 'PAGO POLLOS-PANADERIA', estricto=True) 
                         cols_pago_gsheets = ['OPERACIÓN', 'CEDULA', 'EMPLEADO', 'PLACA', 'VALOR PAGO', 'PERIODO']
                         bulk_data_pago = preparar_df_para_sheets(df_raw_pago, cols_pago_gsheets, per_global_clean)
                         res_pago = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_POLLOS_PAGO", bulk_data_pago, clear_first=False, replace_period=param_replace)
@@ -1661,7 +1650,7 @@ with tab_rentabilidad:
                             msg_pago = " y Pagos Pollos"
                     except Exception:
                         try:
-                            df_raw_pago = extraer_df_desde_excel(file_global, 'PAGO') 
+                            df_raw_pago = extraer_df_desde_excel(file_global, 'PAGO', estricto=True) 
                             cols_pago_gsheets = ['OPERACIÓN', 'CEDULA', 'EMPLEADO', 'PLACA', 'VALOR PAGO', 'PERIODO']
                             bulk_data_pago = preparar_df_para_sheets(df_raw_pago, cols_pago_gsheets, per_global_clean)
                             res_pago = subir_bulk_a_sheets(GAS_URL, "RENTABILIDAD_POLLOS_PAGO", bulk_data_pago, clear_first=False, replace_period=param_replace)
@@ -1741,9 +1730,6 @@ with tab_rentabilidad:
                         
                     df_cruce['NOMBRE_EMPLEADO'] = df_cruce.get('NOMBRE_EMPLEADO', pd.Series(['S/N']*len(df_cruce))).fillna("S/N")
                     
-                    # ---------------------------------------------------------------------
-                    # FILTRO INTERACTIVO PARA AUDITORÍA DE TERCEROS Y PERSONAL DIRECTO
-                    # ---------------------------------------------------------------------
                     mostrar_ceros = st.radio("🔍 Filtro de Auditoría y Totales Reales:", 
                                             ["Mostrar todo (Incluir Personal Directo con pago en $0)", 
                                              "Ocultar Personal Directo (Solo Terceros pagados)",
@@ -1869,7 +1855,6 @@ with tab_rentabilidad:
 
                 df_cobro[col_total_cobro] = pd.to_numeric(df_cobro[col_total_cobro], errors='coerce').fillna(0)
                 
-                # Estandarizador maestro que neutraliza tildes y agrupa correctamente sucursales (ej: Carulla -> Panaderia)
                 def get_clean_origen(row):
                     op_val = remover_tildes(row[col_op])
                     origen_val = remover_tildes(row[col_origen])
@@ -1885,7 +1870,6 @@ with tab_rentabilidad:
                 df_cobro['CLEAN_ORIGEN'] = df_cobro.apply(get_clean_origen, axis=1)
                 df_cobro['CLEAN_OPERACION'] = df_cobro.apply(get_clean_operacion, axis=1)
                 
-                # Link para conectar PAGO y COBRO directamente por Operación
                 def create_link_key(row):
                     op = remover_tildes(row['CLEAN_OPERACION'])
                     orig = remover_tildes(row['CLEAN_ORIGEN'])
@@ -1924,7 +1908,6 @@ with tab_rentabilidad:
                         
                 df_cobro['COSTO_ESTIMADO'] = df_cobro.apply(calcular_costo_pollo_proporcional, axis=1)
 
-                # Agrupación final por Origen y Operación. SIN cálculos de retención.
                 df_cruce = df_cobro.groupby(['CLEAN_ORIGEN', 'CLEAN_OPERACION']).agg(
                     TOTAL_COBRADO=(col_total_cobro, 'sum'),
                     VALOR_PAGADO_NETO=('COSTO_ESTIMADO', 'sum')
@@ -1932,7 +1915,6 @@ with tab_rentabilidad:
                 
                 df_cruce.rename(columns={'CLEAN_ORIGEN': 'ORIGEN', 'CLEAN_OPERACION': 'OPERACIÓN'}, inplace=True)
                 
-                # Solo se muestran las ramas válidas de Pollos
                 mask_visual = df_cruce['ORIGEN'].str.upper().str.contains('INDUSTRIA', na=False) | df_cruce['OPERACIÓN'].str.upper().str.contains('PANADERIA|LECHONAS', na=False)
                 df_cruce = df_cruce[mask_visual]
 
