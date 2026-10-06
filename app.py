@@ -463,8 +463,7 @@ def agregar_pagina_pdf_cuenta_cobro(pdf, datos):
         pdf.cell(85, 6, f"F. Perímetro: {fpu['destino'][:25]}", 1, 0, 'L')
         pdf.cell(35, 6, "N/A", 1, 0, 'C')
         pdf.cell(25, 6, f"{fpu['cantidad']:g} Viaje(s)", 1, 0, 'C')
-        pdf.cell(45, 6, f"$ {fpu['valor_unitario']:,.0f}", 1, 0, 'R')
-        pdf.cell(0, 6, f"$ {fpu['total']:,.0f}", 1, 1, 'R')
+        pdf.cell(45, 6, f"$ {fpu['neto']:,.0f}", 1, 1, 'R')
         
 
     pdf.ln(8)
