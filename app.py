@@ -1181,13 +1181,26 @@ with tab_generador:
         if "Individual" in modo_trabajo:
             titulares_unicos = df_pagos_corte.drop_duplicates(subset=['_ced_prestador_clean', '_ced_banco_clean'])
             
+            col_cond_prev = obtener_nombre_columna(df_pagos_corte, ['CONDUCTOR', 'NOMBRES', 'NOMBRE'])
+
             lista_opciones = []
             for _, row in titulares_unicos.iterrows():
                 if row['_ced_prestador_clean'] in ['nan', '', 'None']: continue
-                lbl = f"📄 Factura: {row[col_prestador]} (NIT: {row['_ced_prestador_clean']}) ➔ 🏦 Cuenta de Cobro a nombre de {row[col_titular_banco]} (CC: {row['_ced_banco_clean']})"
+                
+                nombres_cond = "SIN CONDUCTOR"
+                if col_cond_prev:
+                    mask_p = df_pagos_corte['_ced_prestador_clean'] == row['_ced_prestador_clean']
+                    mask_b = df_pagos_corte['_ced_banco_clean'] == row['_ced_banco_clean']
+                    conductores = df_pagos_corte[mask_p & mask_b][col_cond_prev].dropna().astype(str).str.strip().unique()
+                    conductores = [c for c in conductores if c and c.lower() != 'nan']
+                    if conductores:
+                        nombres_cond = ", ".join(conductores)
+                
+                lbl = f"🛵 Cond: {nombres_cond} | 📄 Fac: {row[col_prestador]} (NIT: {row['_ced_prestador_clean']}) ➔ 🏦 Banco: {row[col_titular_banco]} (CC: {row['_ced_banco_clean']})"
                 lista_opciones.append(lbl)
                 
             if "mostrar_preview" not in st.session_state:
+                
                 st.session_state.mostrar_preview = False
                 st.session_state.titular_actual = ""
                 
